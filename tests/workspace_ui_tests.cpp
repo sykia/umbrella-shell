@@ -3,6 +3,7 @@
 #include <QQuickItem>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQmlError>
 #include <QTimer>
 #include <iostream>
 
@@ -52,7 +53,10 @@ int main(int argc, char** argv) {
     WorkspaceFixture shell;
     QQuickView view;
     bool warnings = false;
-    QObject::connect(view.engine(), &QQmlEngine::warnings, &app, [&] { warnings = true; });
+    QObject::connect(view.engine(), &QQmlEngine::warnings, &app, [&](const QList<QQmlError>& errors) {
+        warnings = true;
+        for (const auto& error : errors) std::cerr << error.toString().toStdString() << '\n';
+    });
     view.rootContext()->setContextProperty("shell", &shell);
     view.rootContext()->setContextProperty("panelId", "fixture");
     view.setInitialProperties({{"zone", 0}});
@@ -80,6 +84,7 @@ int main(int argc, char** argv) {
                 std::cerr << "Delegate count did not settle after resize\n"; app.exit(1); return;
             }
             std::cout << "Workspace QML: 30 routed clicks, stable delegates and count resize\n";
+            if (warnings || shell.clicks != 30) std::cerr << "warnings=" << warnings << " clicks=" << shell.clicks << '\n';
             app.exit(warnings || shell.clicks != 30 ? 1 : 0);
         });
     });
