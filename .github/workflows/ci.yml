@@ -35,10 +35,7 @@ jobs:
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
-          & ./stage/UmbrellaShell.exe --diagnostics
-          if ($LASTEXITCODE -ne 0) { throw 'Deployed host failed' }
-          & ./stage/UmbrellaShell.exe --ui-smoke
-          if ($LASTEXITCODE -ne 0) { throw 'Deployed QML smoke failed' }
+          ./scripts/Test-DeployedApp.ps1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-windows-x64-do-not-distribute
