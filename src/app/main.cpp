@@ -11,6 +11,7 @@
 #include <QQmlContext>
 #include <QTimer>
 #include <QImage>
+#include <QIcon>
 #include <psapi.h>
 int main(int argc, char* argv[]) {
     // Recovery and diagnostics must never initialize a graphics device.
@@ -57,6 +58,7 @@ int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     app.setOrganizationName("UmbrellaShell"); app.setApplicationName("UmbrellaShell");
     app.setApplicationVersion(UMBRELLA_VERSION); app.setQuitOnLastWindowClosed(false);
+    app.setWindowIcon(QIcon(":/assets/umbrella.png"));
     ShellController shell;
     if (smoke) {
         QQuickView bar, settings;
