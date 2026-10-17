@@ -20,8 +20,11 @@ struct TaskbarSession::Impl {
     bool active = false, hotkey = false, installed = false, acquired = false;
 };
 TaskbarSession::TaskbarSession(QObject* parent) : QObject(parent), impl_(std::make_unique<Impl>()) {
-    connect(&impl_->guard, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
-        if (impl_->active) emit recoveryRequested();
+    connect(&impl_->guard, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        if (!impl_->active) return;
+        if (code != 0 || status == QProcess::CrashExit)
+            emit suppressionFailed(tr("Guard завершился (%1): %2").arg(code).arg(QString::fromUtf8(impl_->guard.readAllStandardError().left(1024))));
+        else emit recoveryRequested();
     });
 }
 TaskbarSession::~TaskbarSession() {

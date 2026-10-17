@@ -22,6 +22,10 @@ ShellController::ShellController(QObject* parent) : QObject(parent),
         settings_.setValue("shell/replacement", false); settings_.sync();
         bars_.clear(); qApp->quit();
     });
+    connect(&session_, &TaskbarSession::suppressionFailed, this, [this](const QString& reason) {
+        restore(); enabled_ = false; bars_.clear();
+        settings_.setValue("shell/replacement", false); settings_.sync(); fail(reason);
+    });
     connect(&session_, &TaskbarSession::sessionEnding, this, &ShellController::restore);
     connect(&session_, &TaskbarSession::explorerRestarted, this, [this] {
         if (enabled_) QTimer::singleShot(0, this, [this] {

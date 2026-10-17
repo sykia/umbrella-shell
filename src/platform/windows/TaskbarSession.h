@@ -18,6 +18,7 @@ public:
     bool nativeEventFilter(const QByteArray&, void*, qintptr*) override;
 signals:
     void recoveryRequested();
+    void suppressionFailed(const QString& reason);
     void sessionEnding();
     void explorerRestarted();
     void positionChanged(quintptr window);

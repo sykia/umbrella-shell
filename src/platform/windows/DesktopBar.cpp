@@ -4,12 +4,14 @@
 #include <shellapi.h>
 #include <psapi.h>
 #include <cmath>
+#include <cstdio>
 namespace umbrella::platform {
 constexpr UINT barCallback = WM_APP + 31;
 struct DesktopBar::Impl {
     HWND window_;
     bool registered_ = false;
     bool positioned_ = false;
+    bool positioning_ = false;
 };
 bool requestTaskbarRecovery() {
     HANDLE stop = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\UmbrellaShell.Recovery");
@@ -72,13 +74,13 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
         if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1 || result == WAIT_FAILED) break;
         if (suppress && !armed && result == WAIT_OBJECT_0 + 2) {
             armed = true;
-            if (!visibility.hide() || !SetEvent(applied)) { result = WAIT_FAILED; break; }
+            if (!visibility.hide() || !SetEvent(applied)) { std::fputs("guard: initial suppression failed\n", stderr); result = WAIT_FAILED; break; }
         } else if (suppress) {
             MSG message{};
             for (int batch = 0; batch < 256 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++batch) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
-            if (!visibility.healthy()) { result = WAIT_FAILED; break; }
+            if (!visibility.healthy()) { std::fputs("guard: event suppression failed\n", stderr); result = WAIT_FAILED; break; }
         }
     }
     const bool shown = visibility.restore();
@@ -86,6 +88,7 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
     if (applied) CloseHandle(applied);
     const bool restored = restore((original & ABS_AUTOHIDE) != 0);
     CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
+    if (result == WAIT_FAILED) std::fprintf(stderr, "guard: wait/suppression failure (%lu)\n", GetLastError());
     return result == WAIT_FAILED || !restored || !shown ? 1 : 0;
 }
 namespace {
@@ -130,6 +133,9 @@ DesktopBar::~DesktopBar() {
 }
 bool DesktopBar::position(int logicalHeight, double scale) {
     auto& state = *impl_;
+    if (state.positioning_) return true;
+    state.positioning_ = true;
+    struct Reset { bool& flag; ~Reset() { flag = false; } } reset{state.positioning_};
     MONITORINFO monitor{sizeof(monitor)};
     if (!state.registered_ || !GetMonitorInfoW(MonitorFromWindow(state.window_, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
     APPBARDATA data{sizeof(data)}; data.hWnd = state.window_; data.uEdge = ABE_BOTTOM; data.rc = monitor.rcMonitor;
