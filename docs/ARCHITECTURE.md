@@ -47,7 +47,15 @@ HKCU Run с проверкой абсолютного quoted executable path. С
 Uninstaller удаляет запись Run и запускает recovery; пользовательские данные
 сохраняются. Ни installer, ни приложение не меняют Winlogon или shell policies.
 
-Постоянных таймеров, polling и сетевых запросов нет. Два процесса в активном
+PanelActions изолирует запрос языка foreground-потока, WM_INPUTLANGCHANGEREQUEST,
+открытие ms-settings:sound и SendInput штатных сочетаний рабочих столов.
+Раскладка обновляется coarse-таймером 750 мс только для активного модуля.
+Контроллер хранит валидированные panel/edge и panel/modules/* в QSettings.
+Проверка допустимых значений независима от Windows/Qt (core/PanelConfiguration.h).
+AppBar принимает четыре края, для боковых панелей резервируется ширина 56 DIP.
+Frameless настройки имеют фиксированные 680×440; логотип toggles show/hide.
+FrameAnimation логотипа останавливается вместе с невидимой страницей/окном.
+Сетевых запросов нет. Два процесса в активном
 режиме: GUI и заблокированный на handles guard. D3D11 используется только GUI.
 Тестовый `--ui-smoke` содержит одноразовый таймер; он не меняет панель Windows.
 Измерения ресурсов и ручная матрица: [SHELL_BAR.md](SHELL_BAR.md).

@@ -28,7 +28,9 @@ jobs:
           ./scripts/Test-PublicRepository.ps1
       - name: Build, test, deploy and compile unsigned installer
         shell: pwsh
-        run: ./scripts/Build-Package.ps1
+        run: |
+          $env:UMBRELLA_SMOKE_DIR = Join-Path $env:RUNNER_TEMP 'umbrella-preview'
+          ./scripts/Build-Package.ps1
       - name: Test deployed host without Qt development paths
         shell: pwsh
         run: |
@@ -45,6 +47,11 @@ jobs:
         with:
           name: shell-bar-runtime-development
           path: stage/**
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: settings-preview
+          path: ${{ runner.temp }}/umbrella-preview/*.png
           if-no-files-found: error
   core:
     runs-on: ubuntu-24.04

@@ -131,17 +131,22 @@ DesktopBar::~DesktopBar() {
         APPBARDATA data{sizeof(data)}; data.hWnd = impl_->window_; SHAppBarMessage(ABM_REMOVE, &data);
     }
 }
-bool DesktopBar::position(int logicalHeight, double scale) {
+bool DesktopBar::position(int logicalHeight, double scale, BarEdge edge) {
     auto& state = *impl_;
     if (state.positioning_) return true;
     state.positioning_ = true;
     struct Reset { bool& flag; ~Reset() { flag = false; } } reset{state.positioning_};
     MONITORINFO monitor{sizeof(monitor)};
     if (!state.registered_ || !GetMonitorInfoW(MonitorFromWindow(state.window_, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
-    APPBARDATA data{sizeof(data)}; data.hWnd = state.window_; data.uEdge = ABE_BOTTOM; data.rc = monitor.rcMonitor;
+    APPBARDATA data{sizeof(data)}; data.hWnd = state.window_; data.uEdge = static_cast<UINT>(edge); data.rc = monitor.rcMonitor;
     const LONG height = static_cast<LONG>(std::lround(logicalHeight * scale));
     SHAppBarMessage(ABM_QUERYPOS, &data);
-    data.rc.top = data.rc.bottom - height;
+    switch (edge) {
+    case BarEdge::Top: data.rc.bottom = data.rc.top + height; break;
+    case BarEdge::Bottom: data.rc.top = data.rc.bottom - height; break;
+    case BarEdge::Left: data.rc.right = data.rc.left + height; break;
+    case BarEdge::Right: data.rc.left = data.rc.right - height; break;
+    }
     RECT current{};
     if (GetWindowRect(state.window_, &current) && EqualRect(&current, &data.rc) && state.positioned_) return true;
     SHAppBarMessage(ABM_SETPOS, &data);

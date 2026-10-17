@@ -1,14 +1,17 @@
 import QtQuick
-import QtQuick.Controls
 Rectangle {
-    color: "#191c23"
-    Rectangle { width: parent.width; height: 1; color: "#363b47" }
-    ToolButton {
-        x: 8; anchors.verticalCenter: parent.verticalCenter
-        width: 48; height: 48
-        Accessible.name: qsTr("Настройки Umbrella Shell")
-        ToolTip.visible: hovered; ToolTip.text: Accessible.name
-        contentItem: Image { source: "qrc:/assets/umbrella.png"; fillMode: Image.PreserveAspectFit; sourceSize: Qt.size(48, 48); mipmap: true }
-        onClicked: shell.openSettings()
+    id: bar
+    readonly property bool vertical: shell.panelEdge === "left" || shell.panelEdge === "right"
+    color: "#21212b"
+    PanelGroup { zone: 0; logo: true; vertical: bar.vertical; x: 8; y: 8 }
+    PanelGroup {
+        zone: 1; vertical: bar.vertical
+        x: bar.vertical ? 8 : (bar.width - width) / 2
+        y: bar.vertical ? (bar.height - height) / 2 : 8
+    }
+    PanelGroup {
+        zone: 2; vertical: bar.vertical
+        x: bar.vertical ? 8 : bar.width - width - 8
+        y: bar.vertical ? bar.height - height - 8 : 8
     }
 }

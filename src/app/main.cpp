@@ -14,6 +14,8 @@
 #include <QTimer>
 #include <QImage>
 #include <QIcon>
+#include <QDir>
+#include <QQuickItem>
 int main(int argc, char* argv[]) {
     // Recovery and diagnostics must never initialize a graphics device.
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
@@ -56,6 +58,7 @@ int main(int argc, char* argv[]) {
         }
         return 2;
     }
+    qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
     QGuiApplication app(argc, argv);
     app.setOrganizationName("UmbrellaShell"); app.setApplicationName("UmbrellaShell");
@@ -79,6 +82,19 @@ int main(int argc, char* argv[]) {
         if (bar.status() == QQuickView::Error || settings.status() == QQuickView::Error ||
             QImage(":/assets/umbrella.png").isNull()) return 1;
         bar.show(); settings.show();
+        const QString previewDirectory = qEnvironmentVariable("UMBRELLA_SMOKE_DIR");
+        if (!previewDirectory.isEmpty()) {
+            QDir().mkpath(previewDirectory);
+            for (int page = 0; page < 4; ++page) {
+                QTimer::singleShot(300 + page * 400, &app, [&, page] {
+                    settings.rootObject()->setProperty("page", page);
+                });
+                QTimer::singleShot(550 + page * 400, &app, [&, page, previewDirectory] {
+                    settings.grabWindow().save(previewDirectory + "/settings-" + QString::number(page) + ".png");
+                    if (page == 0) bar.grabWindow().save(previewDirectory + "/bar.png");
+                });
+            }
+        }
         QTimer::singleShot(2000, &app, [&] {
             const auto memory = umbrella::platform::workingSetBytes();
             QTextStream(stdout) << "UI smoke: frames=" << frames << " workingSetBytes=" << memory

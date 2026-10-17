@@ -5,6 +5,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QDir>
+#include "core/PanelConfiguration.h"
 using namespace umbrella::platform;
 namespace {
 QString executable() { return QDir::toNativeSeparators(QCoreApplication::applicationFilePath()); }
@@ -16,6 +17,13 @@ void load(QQuickView& view, ShellController* controller, const QString& name) {
 }
 ShellController::ShellController(QObject* parent) : QObject(parent),
     settings_(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Shell") {
+    const auto savedEdge = settings_.value("panel/edge", "bottom").toString();
+    if (umbrella::core::validPanelEdge(savedEdge.toStdString())) edge_ = savedEdge;
+    for (auto it = zones_.begin(); it != zones_.end(); ++it) {
+        bool valid = false; const int zone = settings_.value("panel/modules/" + it.key(), it.value()).toInt(&valid);
+        if (valid && umbrella::core::validZone(zone)) it.value() = zone;
+    }
+    connect(&actions_, &PanelActions::layoutChanged, this, &ShellController::changed);
     enabled_ = settings_.value("shell/replacement", true).toBool();
     connect(&session_, &TaskbarSession::recoveryRequested, this, [this] {
         restore(); enabled_ = false;
@@ -34,7 +42,7 @@ ShellController::ShellController(QObject* parent) : QObject(parent),
     });
     connect(&session_, &TaskbarSession::positionChanged, this, [this](quintptr window) {
         for (auto& bar : bars_) if (bar->native && bar->view->winId() == window)
-            bar->native->position(56, bar->view->devicePixelRatio());
+            bar->native->position(56, bar->view->devicePixelRatio(), nativeEdge());
     });
 }
 ShellController::~ShellController() { restore(); bars_.clear(); }
@@ -70,6 +78,9 @@ void ShellController::fail(const QString& error) { status_ = error; emit changed
 void ShellController::openSettings() {
     if (!settingsView_) {
         settingsView_ = std::make_unique<QQuickView>();
+        settingsView_->setFlags(Qt::Window | Qt::FramelessWindowHint);
+        settingsView_->setColor(Qt::transparent);
+        settingsView_->setMinimumSize(QSize(680, 440)); settingsView_->setMaximumSize(QSize(680, 440));
         settingsView_->setTitle(tr("Umbrella Shell — Настройки"));
         load(*settingsView_, this, "Settings"); settingsView_->resize(680, 440);
     }
@@ -77,6 +88,7 @@ void ShellController::openSettings() {
 }
 void ShellController::quit() { restore(); qApp->quit(); }
 void ShellController::restore() {
+    actions_.setEnabled(false);
     const bool wasActive = active_; active_ = false;
     if (session_.restore()) {
         if (wasActive) { settings_.remove("recovery"); settings_.sync(); }
@@ -98,7 +110,10 @@ void ShellController::rebuild() {
         view->setTitle("Umbrella Shell Bar — " + screen->name());
         view->setScreen(screen);
         const QRect rect = screen->geometry();
-        view->setGeometry(rect.x(), rect.bottom() - 55, rect.width(), 56);
+        if (edge_ == "top") view->setGeometry(rect.x(), rect.y(), rect.width(), 56);
+        else if (edge_ == "left") view->setGeometry(rect.x(), rect.y(), 56, rect.height());
+        else if (edge_ == "right") view->setGeometry(rect.right() - 55, rect.y(), 56, rect.height());
+        else view->setGeometry(rect.x(), rect.bottom() - 55, rect.width(), 56);
         load(*view, this, "Bar");
         if (view->status() == QQuickView::Error) { rebuilding_ = false; bars_.clear(); fail(tr("Ошибка загрузки QML панели.")); return; }
         Bar* state = bar.get();
@@ -125,6 +140,7 @@ void ShellController::activate() {
     active_ = true;
     if (!session_.hide()) { restore(); fail(tr("Не удалось подтвердить скрытие панелей Windows.")); return; }
     if (!registerBars()) return;
+    actions_.setEnabled(zones_.value("keyboard").toInt() >= 0);
     status_ = session_.hotkeyAvailable()
         ? tr("Панель Umbrella работает. Ctrl+Alt+U — аварийный выход.")
         : tr("Панель Umbrella работает. Ctrl+Alt+U занято; используйте кнопку выхода или --restore-taskbar.");
@@ -135,10 +151,36 @@ bool ShellController::registerBars() {
     for (auto& bar : bars_) {
         bar->native.reset();
         bar->native = std::make_unique<DesktopBar>(bar->view->winId());
-        if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio())) {
+        if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio(), nativeEdge())) {
             restore(); for (auto& item : bars_) item->native.reset();
             fail(tr("Не удалось зарезервировать место панели.")); return false;
         }
     }
     return true;
 }
+
+BarEdge ShellController::nativeEdge() const {
+    if (edge_ == "top") return BarEdge::Top;
+    if (edge_ == "left") return BarEdge::Left;
+    if (edge_ == "right") return BarEdge::Right;
+    return BarEdge::Bottom;
+}
+void ShellController::setPanelEdge(const QString& edge) {
+    if (edge == edge_ || !umbrella::core::validPanelEdge(edge.toStdString())) return;
+    settings_.setValue("panel/edge", edge); settings_.sync();
+    if (settings_.status() != QSettings::NoError) { fail(tr("Не удалось сохранить расположение.")); return; }
+    edge_ = edge; emit changed(); if (enabled_) rebuild();
+}
+void ShellController::setModuleZone(const QString& module, int zone) {
+    if (!umbrella::core::validModule(module.toStdString()) || !umbrella::core::validZone(zone)) return;
+    settings_.setValue("panel/modules/" + module, zone); settings_.sync();
+    if (settings_.status() != QSettings::NoError) { fail(tr("Не удалось сохранить конфигурацию.")); return; }
+    zones_[module] = zone; actions_.setEnabled(active_ && zones_.value("keyboard").toInt() >= 0); emit changed();
+}
+void ShellController::toggleSettings() {
+    if (settingsView_ && settingsView_->isVisible()) settingsView_->hide(); else openSettings();
+}
+void ShellController::cycleKeyboard() { if (!actions_.cycleLayout()) fail(tr("Не удалось сменить раскладку активного окна. Проверьте установленные языки и права окна.")); }
+void ShellController::openSound() { if (!actions_.openSound()) fail(tr("Не удалось открыть параметры звука Windows.")); }
+void ShellController::moveDesktop(int direction) { if (!actions_.moveDesktop(direction)) fail(tr("Отпустите клавиши-модификаторы и повторите переключение рабочего стола.")); }
+void ShellController::showDesktops() { if (!actions_.showDesktops()) fail(tr("Не удалось открыть представление рабочих столов.")); }
