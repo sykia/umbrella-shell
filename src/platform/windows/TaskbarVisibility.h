@@ -12,6 +12,7 @@ public:
     TaskbarVisibility& operator=(const TaskbarVisibility&) = delete;
     bool install();
     bool hide();
+    bool healthy() const;
     bool restore();
 private:
     struct Impl;

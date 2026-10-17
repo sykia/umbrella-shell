@@ -67,7 +67,7 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
     DWORD result = WAIT_FAILED;
     bool armed = false;
     for (;;) {
-        result = suppress ? MsgWaitForMultipleObjects(armed ? 2 : 3, waits, FALSE, INFINITE, QS_ALLINPUT)
+        result = suppress ? MsgWaitForMultipleObjectsEx(armed ? 2 : 3, waits, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
                           : WaitForMultipleObjects(2, waits, FALSE, INFINITE);
         if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1 || result == WAIT_FAILED) break;
         if (suppress && !armed && result == WAIT_OBJECT_0 + 2) {
@@ -75,9 +75,10 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
             if (!visibility.hide() || !SetEvent(applied)) { result = WAIT_FAILED; break; }
         } else if (suppress) {
             MSG message{};
-            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+            for (int batch = 0; batch < 256 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++batch) {
                 TranslateMessage(&message); DispatchMessageW(&message);
             }
+            if (!visibility.healthy()) { result = WAIT_FAILED; break; }
         }
     }
     const bool shown = visibility.restore();

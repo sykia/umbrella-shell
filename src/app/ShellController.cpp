@@ -24,7 +24,9 @@ ShellController::ShellController(QObject* parent) : QObject(parent),
     });
     connect(&session_, &TaskbarSession::sessionEnding, this, &ShellController::restore);
     connect(&session_, &TaskbarSession::explorerRestarted, this, [this] {
-        if (enabled_) QTimer::singleShot(0, this, [this] { rebuild(); });
+        if (enabled_) QTimer::singleShot(0, this, [this] {
+            if (active_) registerBars(); else rebuild();
+        });
     });
     connect(&session_, &TaskbarSession::positionChanged, this, [this](quintptr window) {
         for (auto& bar : bars_) if (bar->native && bar->view->winId() == window)
@@ -89,6 +91,7 @@ void ShellController::rebuild() {
         bar->view = std::make_unique<QQuickView>();
         auto* view = bar->view.get();
         view->setFlags(Qt::FramelessWindowHint | Qt::Tool | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus);
+        view->setTitle("Umbrella Shell Bar — " + screen->name());
         view->setScreen(screen);
         const QRect rect = screen->geometry();
         view->setGeometry(rect.x(), rect.bottom() - 55, rect.width(), 56);
@@ -117,15 +120,21 @@ void ShellController::activate() {
     if (settings_.status() != QSettings::NoError) { restore(); fail(tr("Не удалось сохранить журнал восстановления.")); return; }
     active_ = true;
     if (!session_.hide()) { restore(); fail(tr("Не удалось подтвердить скрытие панелей Windows.")); return; }
-    for (auto& bar : bars_) {
-        bar->native = std::make_unique<DesktopBar>(bar->view->winId());
-        if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio())) {
-            restore(); for (auto& item : bars_) item->native.reset();
-            fail(tr("Не удалось зарезервировать место панели.")); return;
-        }
-    }
+    if (!registerBars()) return;
     status_ = session_.hotkeyAvailable()
         ? tr("Панель Umbrella работает. Ctrl+Alt+U — аварийный выход.")
         : tr("Панель Umbrella работает. Ctrl+Alt+U занято; используйте кнопку выхода или --restore-taskbar.");
     emit changed();
+}
+
+bool ShellController::registerBars() {
+    for (auto& bar : bars_) {
+        bar->native.reset();
+        bar->native = std::make_unique<DesktopBar>(bar->view->winId());
+        if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio())) {
+            restore(); for (auto& item : bars_) item->native.reset();
+            fail(tr("Не удалось зарезервировать место панели.")); return false;
+        }
+    }
+    return true;
 }

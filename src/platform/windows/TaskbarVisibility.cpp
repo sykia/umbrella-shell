@@ -44,13 +44,13 @@ std::vector<Window> windows() {
 struct TaskbarVisibility::Impl {
     std::vector<Window> hidden;
     HWINEVENTHOOK hook{};
-    bool active = false;
+    bool active = false, failed = false;
     static thread_local Impl* current;
     static void CALLBACK event(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG object, LONG child, DWORD, DWORD) {
         auto* self = current;
         if (!self || !self->active || object != OBJID_WINDOW || child != CHILDID_SELF || !hwnd) return;
         if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_LOCATIONCHANGE)
-            self->suppress(hwnd);
+            if (!self->suppress(hwnd)) self->failed = true;
     }
     bool suppress(HWND hwnd) {
         Window item{};
@@ -79,6 +79,7 @@ bool TaskbarVisibility::install() {
     if (!impl_->hook) Impl::current = nullptr;
     return impl_->hook != nullptr;
 }
+bool TaskbarVisibility::healthy() const { return !impl_->failed; }
 bool TaskbarVisibility::hide() {
     if (!impl_->hook) return false;
     const auto existing = windows();

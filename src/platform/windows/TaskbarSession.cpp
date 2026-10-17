@@ -66,10 +66,11 @@ bool TaskbarSession::restore() {
     const bool wasActive = impl_->active; impl_->active = false;
     if (impl_->stop) SetEvent(impl_->stop.get());
     const bool stopped = impl_->guard.state() == QProcess::NotRunning || impl_->guard.waitForFinished(5000);
-    const bool restored = !wasActive || (restoreTaskbarWindows() && setAutoHide(originalAutoHide()));
+    const bool shown = !wasActive || restoreTaskbarWindows();
+    const bool restored = !wasActive || setAutoHide(originalAutoHide());
     // Do not start another guardian while the old one can still restore stale state.
     if (stopped) { impl_->ready.reset(); impl_->stop.reset(); impl_->arm.reset(); impl_->applied.reset(); }
-    return stopped && restored;
+    return stopped && restored && shown;
 }
 bool TaskbarSession::nativeEventFilter(const QByteArray&, void* message, qintptr*) {
     auto* msg = static_cast<MSG*>(message);

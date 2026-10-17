@@ -32,6 +32,7 @@ private:
     };
     void rebuild();
     void activate();
+    bool registerBars();
     void restore();
     void fail(const QString& error);
     QSettings settings_;
