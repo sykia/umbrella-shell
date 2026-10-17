@@ -45,12 +45,41 @@ struct TaskbarVisibility::Impl {
     std::vector<Window> hidden;
     HWINEVENTHOOK hook{};
     bool active = false, failed = false;
+    HWND retryWindow{};
+    bool retryPending = false;
+    unsigned retries = 0;
     static thread_local Impl* current;
+    static LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
+        if (message == WM_NCCREATE) {
+            const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+        }
+        auto* self = reinterpret_cast<Impl*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (self && message == WM_TIMER && w == 1) {
+            KillTimer(hwnd, 1);
+            if (!self->active) { self->retryPending = false; return 0; }
+            bool hidden = true;
+            for (const auto& item : windows()) hidden = self->suppress(item.hwnd) && hidden;
+            if (hidden) { self->retryPending = false; self->retries = 0; }
+            else if (++self->retries >= 3 || !SetTimer(hwnd, 1, 50, nullptr)) {
+                self->retryPending = false; self->failed = true;
+            }
+            return 0;
+        }
+        return DefWindowProcW(hwnd, message, w, l);
+    }
+    void retry() {
+        if (retryPending) return;
+        retries = 0; retryPending = true;
+        if (!retryWindow || !SetTimer(retryWindow, 1, 50, nullptr)) failed = true;
+    }
     static void CALLBACK event(HWINEVENTHOOK, DWORD event, HWND hwnd, LONG object, LONG child, DWORD, DWORD) {
         auto* self = current;
         if (!self || !self->active || object != OBJID_WINDOW || child != CHILDID_SELF || !hwnd) return;
         if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_LOCATIONCHANGE)
-            if (!self->suppress(hwnd)) self->failed = true;
+            // Explorer can re-show a taskbar before ShowWindow returns. Let its
+            // queued events settle before treating this race as a permanent failure.
+            if (!self->suppress(hwnd)) self->retry();
     }
     bool suppress(HWND hwnd) {
         Window item{};
@@ -74,9 +103,14 @@ TaskbarVisibility::~TaskbarVisibility() { restore(); }
 bool TaskbarVisibility::install() {
     if (Impl::current || impl_->hook) return false;
     Impl::current = impl_.get();
+    WNDCLASSW type{}; type.lpfnWndProc = Impl::windowProc; type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"UmbrellaShell.TaskbarSuppression";
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) { Impl::current = nullptr; return false; }
+    impl_->retryWindow = CreateWindowExW(0, type.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, type.hInstance, impl_.get());
+    if (!impl_->retryWindow) { Impl::current = nullptr; return false; }
     impl_->hook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
         Impl::event, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-    if (!impl_->hook) Impl::current = nullptr;
+    if (!impl_->hook) { DestroyWindow(impl_->retryWindow); impl_->retryWindow = nullptr; Impl::current = nullptr; }
     return impl_->hook != nullptr;
 }
 bool TaskbarVisibility::healthy() const { return !impl_->failed; }
@@ -90,6 +124,10 @@ bool TaskbarVisibility::hide() {
 }
 bool TaskbarVisibility::restore() {
     impl_->active = false;
+    if (impl_->retryWindow) {
+        KillTimer(impl_->retryWindow, 1); DestroyWindow(impl_->retryWindow); impl_->retryWindow = nullptr;
+    }
+    impl_->retryPending = false;
     if (impl_->hook) { UnhookWinEvent(impl_->hook); impl_->hook = nullptr; }
     if (Impl::current == impl_.get()) Impl::current = nullptr;
     bool result = true;
