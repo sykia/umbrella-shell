@@ -52,8 +52,8 @@ private:
     umbrella::platform::BarEdge nativeEdge() const;
     QSettings settings_;
     umbrella::platform::PanelActions actions_;
-    QString edge_ = "bottom";
-    QVariantMap zones_{{"workspaces", 0}, {"keyboard", 2}, {"volume", 2}};
+    QString edge_ = "top";
+    QVariantMap zones_{{"workspaces", 0}, {"keyboard", 0}, {"volume", 2}};
     std::vector<std::unique_ptr<Bar>> bars_;
     std::unique_ptr<QQuickView> settingsView_;
     umbrella::platform::TaskbarSession session_;

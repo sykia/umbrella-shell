@@ -17,7 +17,7 @@ void load(QQuickView& view, ShellController* controller, const QString& name) {
 }
 ShellController::ShellController(QObject* parent) : QObject(parent),
     settings_(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Shell") {
-    const auto savedEdge = settings_.value("panel/edge", "bottom").toString();
+    const auto savedEdge = settings_.value("panel/edge", "top").toString();
     if (umbrella::core::validPanelEdge(savedEdge.toStdString())) edge_ = savedEdge;
     for (auto it = zones_.begin(); it != zones_.end(); ++it) {
         bool valid = false; const int zone = settings_.value("panel/modules/" + it.key(), it.value()).toInt(&valid);
@@ -42,7 +42,7 @@ ShellController::ShellController(QObject* parent) : QObject(parent),
     });
     connect(&session_, &TaskbarSession::positionChanged, this, [this](quintptr window) {
         for (auto& bar : bars_) if (bar->native && bar->view->winId() == window)
-            bar->native->position(56, bar->view->devicePixelRatio(), nativeEdge());
+            bar->native->position(36, bar->view->devicePixelRatio(), nativeEdge());
     });
 }
 ShellController::~ShellController() { restore(); bars_.clear(); }
@@ -110,10 +110,10 @@ void ShellController::rebuild() {
         view->setTitle("Umbrella Shell Bar — " + screen->name());
         view->setScreen(screen);
         const QRect rect = screen->geometry();
-        if (edge_ == "top") view->setGeometry(rect.x(), rect.y(), rect.width(), 56);
-        else if (edge_ == "left") view->setGeometry(rect.x(), rect.y(), 56, rect.height());
-        else if (edge_ == "right") view->setGeometry(rect.right() - 55, rect.y(), 56, rect.height());
-        else view->setGeometry(rect.x(), rect.bottom() - 55, rect.width(), 56);
+        if (edge_ == "top") view->setGeometry(rect.x(), rect.y(), rect.width(), 36);
+        else if (edge_ == "left") view->setGeometry(rect.x(), rect.y(), 36, rect.height());
+        else if (edge_ == "right") view->setGeometry(rect.right() - 35, rect.y(), 36, rect.height());
+        else view->setGeometry(rect.x(), rect.bottom() - 35, rect.width(), 36);
         load(*view, this, "Bar");
         if (view->status() == QQuickView::Error) { rebuilding_ = false; bars_.clear(); fail(tr("Ошибка загрузки QML панели.")); return; }
         Bar* state = bar.get();
@@ -151,7 +151,7 @@ bool ShellController::registerBars() {
     for (auto& bar : bars_) {
         bar->native.reset();
         bar->native = std::make_unique<DesktopBar>(bar->view->winId());
-        if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio(), nativeEdge())) {
+        if (!bar->native->registered() || !bar->native->position(36, bar->view->devicePixelRatio(), nativeEdge())) {
             restore(); for (auto& item : bars_) item->native.reset();
             fail(tr("Не удалось зарезервировать место панели.")); return false;
         }

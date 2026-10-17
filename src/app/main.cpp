@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
             QObject::connect(view, &QQuickWindow::frameSwapped, &app, [&frames] { ++frames; }, Qt::QueuedConnection);
             QObject::connect(view, &QQuickWindow::sceneGraphError, &app, [&graphicsError] { graphicsError = true; });
         }
-        bar.setSource(QUrl("qrc:/qt/qml/Umbrella/Bar.qml")); bar.resize(640, 56);
+        bar.setSource(QUrl("qrc:/qt/qml/Umbrella/Bar.qml")); bar.resize(640, 36);
         settings.setSource(QUrl("qrc:/qt/qml/Umbrella/Settings.qml")); settings.resize(680, 440);
         if (bar.status() == QQuickView::Error || settings.status() == QQuickView::Error ||
             QImage(":/assets/umbrella.png").isNull()) return 1;
