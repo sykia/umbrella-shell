@@ -5,19 +5,20 @@ ColumnLayout {
     id: config
     required property var modules
     required property Item dragSurface
+    readonly property var theme: shell.preferences.theme
     spacing: 8
-    Label { text: qsTr("Конфигурация панели"); font.bold: true; color: "#4c4145"; font.pixelSize: 12 }
-    Label { text: qsTr("Зажмите модуль и перетащите в нужную зону. Отпускание за её пределами отменяет перенос."); Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#87727c"; font.pixelSize: 10 }
+    Label { text: qsTr("Конфигурация панели"); font.bold: true; color: config.theme.ink; font.pixelSize: 12 }
+    Label { text: qsTr("Зажмите модуль и перетащите в нужную зону. Отпускание за её пределами отменяет перенос."); Layout.fillWidth: true; wrapMode: Text.WordWrap; color: config.theme.muted; font.pixelSize: 10 }
     component Zone: Rectangle {
         id: zoneCard
         required property int zone
         required property string title
         Layout.fillWidth: true
-        radius: 12; color: drop.containsDrag ? "#f6dce1" : "#f8f4f5"
+        radius: Math.min(12, shell.preferences.cornerRadius); color: drop.containsDrag ? Qt.tint(config.theme.surface, Qt.rgba(config.theme.accent.r, config.theme.accent.g, config.theme.accent.b, 0.22)) : config.theme.background
         border.width: drop.containsDrag ? 2 : 1
-        border.color: drop.containsDrag ? "#d9263b" : "#e3d7dc"
+        border.color: drop.containsDrag ? config.theme.accent : "#e3d7dc"
         Behavior on color { ColorAnimation { duration: 150 } }
-        Label { x: 9; y: 7; text: zoneCard.title; font.pixelSize: 10; font.bold: true; color: "#82717a" }
+        Label { x: 9; y: 7; text: zoneCard.title; font.pixelSize: 10; font.bold: true; color: config.theme.muted }
         DropArea {
             id: drop; anchors.fill: parent; keys: ["umbrella-module"]
             onDropped: event => {
@@ -41,8 +42,8 @@ ColumnLayout {
                         id: tile
                         property string moduleKey: holder.modelData.key
                         width: holder.width; height: holder.height; radius: 10
-                        color: mouse.drag.active ? "#f2bdc7" : (mouse.containsMouse ? "#ead4db" : "#e5dce0")
-                        border.color: mouse.drag.active ? "#d9263b" : "transparent"
+                        color: mouse.drag.active ? Qt.tint(config.theme.surface, Qt.rgba(config.theme.accent.r, config.theme.accent.g, config.theme.accent.b, 0.22)) : (mouse.containsMouse ? Qt.tint(config.theme.surface, Qt.rgba(config.theme.accent.r, config.theme.accent.g, config.theme.accent.b, 0.22)) : config.theme.raised)
+                        border.color: mouse.drag.active ? config.theme.accent : "transparent"
                         scale: mouse.drag.active ? 1.04 : 1
                         Behavior on color { ColorAnimation { duration: 130 } }
                         Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
@@ -51,7 +52,7 @@ ColumnLayout {
                         Drag.source: tile
                         Drag.hotSpot.x: width / 2; Drag.hotSpot.y: height / 2
                         Image { x: 8; anchors.verticalCenter: parent.verticalCenter; width: 14; height: 14; source: "qrc:/assets/icons/" + holder.modelData.icon + ".svg"; sourceSize: Qt.size(20, 20) }
-                        Label { x: 27; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 32; text: holder.modelData.title; font.pixelSize: 10; font.bold: true; color: "#594650"; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight }
+                        Label { x: 27; anchors.verticalCenter: parent.verticalCenter; width: parent.width - 32; text: holder.modelData.title; font.pixelSize: 10; font.bold: true; color: config.theme.ink; wrapMode: Text.WordWrap; maximumLineCount: 2; elide: Text.ElideRight }
                         Accessible.role: Accessible.Button
                         Accessible.name: holder.modelData.title
                         MouseArea {

@@ -13,6 +13,7 @@ struct DesktopBar::Impl {
     bool registered_ = false;
     bool positioned_ = false;
     bool positioning_ = false;
+    RECT reservation_{};
 };
 bool requestTaskbarRecovery() {
     HANDLE stop = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\UmbrellaShell.Recovery");
@@ -151,7 +152,7 @@ bool DesktopBar::position(int logicalHeight, double scale, BarEdge edge) {
     }
     const RECT anchored = data.rc;
     RECT current{};
-    if (GetWindowRect(state.window_, &current) && EqualRect(&current, &anchored) && state.positioned_) return true;
+    const bool windowPositioned = GetWindowRect(state.window_, &current) && EqualRect(&current, &anchored);
     SHAppBarMessage(ABM_QUERYPOS, &data);
     switch (edge) {
     case BarEdge::Top: data.rc.bottom = data.rc.top + height; break;
@@ -159,9 +160,17 @@ bool DesktopBar::position(int logicalHeight, double scale, BarEdge edge) {
     case BarEdge::Left: data.rc.right = data.rc.left + height; break;
     case BarEdge::Right: data.rc.left = data.rc.right - height; break;
     }
-    SHAppBarMessage(ABM_SETPOS, &data);
-    state.positioned_ = true;
-    return SetWindowPos(state.window_, HWND_TOPMOST, anchored.left, anchored.top,
-        anchored.right - anchored.left, anchored.bottom - anchored.top, SWP_NOACTIVATE) != FALSE;
+    // The window may be anchored correctly while Explorer's work area has changed.
+    // Update the reservation only when it differs, avoiding AppBar callback loops.
+    if (!state.positioned_ || !EqualRect(&state.reservation_, &data.rc)) {
+        SHAppBarMessage(ABM_SETPOS, &data);
+        state.reservation_ = data.rc;
+    }
+    if (windowPositioned && state.positioned_) return true;
+    const UINT flags = SWP_NOACTIVATE | (state.positioned_ ? SWP_NOZORDER : 0);
+    const bool positioned = SetWindowPos(state.window_, HWND_TOPMOST, anchored.left, anchored.top,
+        anchored.right - anchored.left, anchored.bottom - anchored.top, flags) != FALSE;
+    state.positioned_ = positioned;
+    return positioned;
 }
 }

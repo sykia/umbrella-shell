@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
                     const bool saved = settings.grabWindow().save(previewDirectory + "/settings-" + QString::number(page) + ".png");
                     const bool barSaved = page != 0 || bar.grabWindow().save(previewDirectory + "/bar.png");
                     if (!saved || !barSaved) { app.exit(1); return; }
-                    if (page < 3) previewPage(page + 1); else finish();
+                    if (page < 5) previewPage(page + 1); else finish();
                 });
             };
             QTimer::singleShot(300, &app, [&] { previewPage(0); });

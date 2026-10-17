@@ -1,4 +1,5 @@
 #include "MonitorWorkspaces.h"
+#include "core/PanelConfiguration.h"
 #include <QTimer>
 #include <windows.h>
 #include <dwmapi.h>
@@ -8,7 +9,7 @@
 #include <vector>
 namespace umbrella::platform {
 namespace {
-constexpr unsigned maxWindows = 256, maxMonitors = 16, spaces = 5, signature = 0x554d4257;
+constexpr unsigned maxWindows = 256, maxMonitors = 16, signature = 0x554d4257;
 struct Identity { UINT_PTR hwnd; DWORD pid; FILETIME created; UINT show; };
 struct Snapshot { unsigned count; Identity windows[maxWindows]; };
 struct Shared { unsigned magic; volatile LONG published; Snapshot snapshots[2]; };
@@ -99,6 +100,8 @@ struct MonitorWorkspaces::Impl {
     std::map<UINT_PTR, unsigned> active;
     bool enabled = false;
     DWORD scope = 0;
+    unsigned count = 5;
+    QString snapshotName;
     QVariantList fingerprint;
     bool publish() {
         std::vector<Identity> hidden;
@@ -113,8 +116,19 @@ MonitorWorkspaces::MonitorWorkspaces(QObject* parent, quint32 scopeProcess) : QO
 }
 MonitorWorkspaces::~MonitorWorkspaces() { stop(); }
 bool MonitorWorkspaces::running() const { return impl_->enabled; }
+bool MonitorWorkspaces::setCount(int count) {
+    if (!umbrella::core::validWorkspaceCount(count)) return false;
+    if (impl_->count == static_cast<unsigned>(count)) return true;
+    const bool restart = impl_->enabled;
+    const auto name = impl_->snapshotName;
+    // Never leave windows stranded in a removed group. Return all before regrouping.
+    if (!stop()) return false;
+    impl_->count = static_cast<unsigned>(count);
+    return !restart || start(name);
+}
 bool MonitorWorkspaces::start(const QString& snapshot) {
     if (!stop() || !impl_->snapshot.open(snapshot.toStdWString(), false)) return false;
+    impl_->snapshotName = snapshot;
     impl_->enabled = true; refresh(); if (impl_->enabled) impl_->timer.start(); emit changed(); return impl_->enabled;
 }
 bool MonitorWorkspaces::stop() {
@@ -151,7 +165,7 @@ void MonitorWorkspaces::refresh() {
     QVariantList fingerprint;
     for (const auto& [monitor, active] : impl_->active) {
         fingerprint << QVariant::fromValue<qulonglong>(monitor) << active;
-        for (unsigned space = 0; space < spaces; ++space)
+        for (unsigned space = 0; space < impl_->count; ++space)
             fingerprint << static_cast<int>(std::count_if(impl_->windows.begin(), impl_->windows.end(), [=](const auto& window) { return window.monitor == monitor && window.space == space; }));
     }
     if (impl_->fingerprint != fingerprint) { impl_->fingerprint = fingerprint; emit changed(); }
@@ -160,7 +174,7 @@ QVariantList MonitorWorkspaces::model(quintptr panel) const {
     QVariantList result; if (!impl_->enabled) return result;
     const auto monitor = reinterpret_cast<UINT_PTR>(MonitorFromWindow(reinterpret_cast<HWND>(panel), MONITOR_DEFAULTTONEAREST));
     const auto found = impl_->active.find(monitor); if (found == impl_->active.end()) return result;
-    for (unsigned space = 0; space < spaces; ++space) {
+    for (unsigned space = 0; space < impl_->count; ++space) {
         const auto count = std::count_if(impl_->windows.begin(), impl_->windows.end(), [=](const auto& window) { return window.monitor == monitor && window.space == space; });
         result << QVariantMap{{"index", space}, {"active", found->second == space}, {"occupied", count > 0}};
     }
@@ -168,7 +182,7 @@ QVariantList MonitorWorkspaces::model(quintptr panel) const {
 }
 bool MonitorWorkspaces::select(quintptr panel, int index) {
     DWORD pid = 0; GetWindowThreadProcessId(reinterpret_cast<HWND>(panel), &pid);
-    if (!impl_->enabled || index < 0 || index >= static_cast<int>(spaces) || pid != GetCurrentProcessId() ||
+    if (!impl_->enabled || index < 0 || index >= static_cast<int>(impl_->count) || pid != GetCurrentProcessId() ||
         !GetPropW(reinterpret_cast<HWND>(panel), L"UmbrellaShell.AppBar")) return false;
     refresh(); const auto monitor = reinterpret_cast<UINT_PTR>(MonitorFromWindow(reinterpret_cast<HWND>(panel), MONITOR_DEFAULTTONEAREST));
     auto active = impl_->active.find(monitor); if (active == impl_->active.end()) return false;

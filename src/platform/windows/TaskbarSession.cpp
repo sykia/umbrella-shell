@@ -86,13 +86,18 @@ bool TaskbarSession::nativeEventFilter(const QByteArray&, void* message, qintptr
     if (GetPropW(msg->hwnd, L"UmbrellaShell.AppBar")) {
         APPBARDATA data{sizeof(data)}; data.hWnd = msg->hwnd;
         if (msg->message == WM_ACTIVATE) SHAppBarMessage(ABM_ACTIVATE, &data);
-        if (msg->message == WM_WINDOWPOSCHANGED) SHAppBarMessage(ABM_WINDOWPOSCHANGED, &data);
+        if (msg->message == WM_WINDOWPOSCHANGED) {
+            const auto* position = reinterpret_cast<const WINDOWPOS*>(msg->lParam);
+            // Z-order-only changes must not start another work-area negotiation.
+            if (position && (position->flags & (SWP_NOMOVE | SWP_NOSIZE)) != (SWP_NOMOVE | SWP_NOSIZE))
+                SHAppBarMessage(ABM_WINDOWPOSCHANGED, &data);
+        }
     }
     static const UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
     if (msg->message == taskbarCreated) emit explorerRestarted();
     if (msg->message == WM_HOTKEY && msg->wParam == 1) emit recoveryRequested();
     if (msg->message == WM_QUERYENDSESSION || msg->message == WM_ENDSESSION) emit sessionEnding();
-    if (msg->message == barCallback && msg->wParam == ABN_FULLSCREENAPP) {
+    if (GetPropW(msg->hwnd, L"UmbrellaShell.AppBar") && msg->message == barCallback && msg->wParam == ABN_FULLSCREENAPP) {
         const HWND foreground = GetForegroundWindow();
         DWORD pid = 0; GetWindowThreadProcessId(foreground, &pid);
         RECT rect{}; MONITORINFO monitor{sizeof(monitor)};
@@ -105,7 +110,7 @@ bool TaskbarSession::nativeEventFilter(const QByteArray&, void* message, qintptr
             rect.right >= monitor.rcMonitor.right && rect.bottom >= monitor.rcMonitor.bottom;
         SetWindowPos(msg->hwnd, fullscreen ? HWND_NOTOPMOST : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
-    if (msg->message == barCallback && msg->wParam == ABN_POSCHANGED)
+    if (GetPropW(msg->hwnd, L"UmbrellaShell.AppBar") && msg->message == barCallback && msg->wParam == ABN_POSCHANGED)
         emit positionChanged(reinterpret_cast<quintptr>(msg->hwnd));
     return false;
 }

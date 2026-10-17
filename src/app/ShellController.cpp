@@ -5,6 +5,8 @@
 #include <QScreen>
 #include <QTimer>
 #include <QDir>
+#include <QFont>
+#include <QPalette>
 #include "core/PanelConfiguration.h"
 using namespace umbrella::platform;
 namespace {
@@ -17,8 +19,26 @@ void load(QQuickView& view, ShellController* controller, const QString& name) {
 }
 ShellController::ShellController(QObject* parent) : QObject(parent),
     settings_(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Shell") {
+    const auto applyAppearance = [this] {
+        QGuiApplication::setFont(QFont(preferences_.fontFamily()));
+        const auto theme = preferences_.theme();
+        QPalette palette;
+        palette.setColor(QPalette::Window, QColor(theme.value("background").toString()));
+        palette.setColor(QPalette::Base, QColor(theme.value("surface").toString()));
+        palette.setColor(QPalette::Button, QColor(theme.value("raised").toString()));
+        for (auto role : {QPalette::Text, QPalette::WindowText, QPalette::ButtonText}) palette.setColor(role, QColor(theme.value("ink").toString()));
+        palette.setColor(QPalette::Highlight, QColor(theme.value("accent").toString()));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+        QGuiApplication::setPalette(palette);
+    };
+    connect(&preferences_, &Preferences::appearanceChanged, this, applyAppearance);
+    applyAppearance();
     const auto savedEdge = settings_.value("panel/edge", "top").toString();
     if (umbrella::core::validPanelEdge(savedEdge.toStdString())) edge_ = savedEdge;
+    bool validCount = false;
+    const int savedCount = settings_.value("panel/workspaceCount", 5).toInt(&validCount);
+    if (validCount && umbrella::core::validWorkspaceCount(savedCount)) workspaceCount_ = savedCount;
+    workspaces_.setCount(workspaceCount_);
     for (auto it = zones_.begin(); it != zones_.end(); ++it) {
         bool valid = false; const int zone = settings_.value("panel/modules/" + it.key(), it.value()).toInt(&valid);
         if (valid && umbrella::core::validZone(zone)) it.value() = zone;
@@ -37,15 +57,25 @@ ShellController::ShellController(QObject* parent) : QObject(parent),
         settings_.setValue("shell/replacement", false); settings_.sync(); fail(reason);
     });
     connect(&session_, &TaskbarSession::sessionEnding, this, &ShellController::restore);
-    connect(&session_, &TaskbarSession::explorerRestarted, this, [this] {
-        if (enabled_) QTimer::singleShot(0, this, [this] {
+    // TaskbarCreated is broadcast to every top-level window, including settings.
+    // Coalesce one Explorer restart instead of registering every bar N times.
+    explorerRefresh_.setSingleShot(true);
+    explorerRefresh_.setInterval(100);
+    connect(&explorerRefresh_, &QTimer::timeout, this, [this] {
+        if (enabled_ && !rebuilding_) {
             if (active_) registerBars(); else rebuild();
-        });
+        }
+    });
+    connect(&session_, &TaskbarSession::explorerRestarted, this, [this] {
+        if (enabled_) explorerRefresh_.start();
     });
     connect(&session_, &TaskbarSession::positionChanged, this, [this](quintptr window) {
         for (auto& bar : bars_) if (bar->native && bar->view->winId() == window)
             bar->native->position(36, bar->view->devicePixelRatio(), nativeEdge());
-    });
+    }, Qt::QueuedConnection);
+    topologyRefresh_.setSingleShot(true);
+    topologyRefresh_.setInterval(150);
+    connect(&topologyRefresh_, &QTimer::timeout, this, &ShellController::rebuild);
 }
 ShellController::~ShellController() { restore(); bars_.clear(); }
 bool ShellController::start() {
@@ -58,8 +88,8 @@ bool ShellController::start() {
     if (!session_.hotkeyAvailable()) {
         fail(tr("Ctrl+Alt+U занято. Используйте кнопку восстановления или --restore-taskbar."));
     }
-    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen*) { rebuild(); });
-    connect(qApp, &QGuiApplication::screenRemoved, this, [this](QScreen*) { rebuild(); });
+    connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen*) { topologyRefresh_.start(); });
+    connect(qApp, &QGuiApplication::screenRemoved, this, [this](QScreen*) { topologyRefresh_.start(); });
     if (enabled_) rebuild(); else openSettings();
     return true;
 }
@@ -93,6 +123,8 @@ void ShellController::restore() {
     workspaces_.stop();
     actions_.setEnabled(false);
     const bool wasActive = active_; active_ = false;
+    // Release our work-area reservations before restoring Explorer's own area.
+    for (auto& bar : bars_) bar->native.reset();
     if (session_.restore()) {
         if (wasActive) { settings_.remove("recovery"); settings_.sync(); }
     } else status_ = tr("Windows не подтвердила восстановление. Выполните --restore-taskbar.");
@@ -104,8 +136,8 @@ void ShellController::rebuild() {
     for (auto* screen : QGuiApplication::screens()) {
         // Unique connections are not available for lambdas: reconnect this receiver only.
         disconnect(screen, nullptr, this, nullptr);
-        connect(screen, &QScreen::geometryChanged, this, [this] { rebuild(); });
-        connect(screen, &QScreen::logicalDotsPerInchChanged, this, [this] { rebuild(); });
+        connect(screen, &QScreen::geometryChanged, this, [this] { topologyRefresh_.start(); });
+        connect(screen, &QScreen::logicalDotsPerInchChanged, this, [this] { topologyRefresh_.start(); });
         auto bar = std::make_unique<Bar>();
         bar->view = std::make_unique<QQuickView>();
         auto* view = bar->view.get();
@@ -191,6 +223,18 @@ void ShellController::setModuleZone(const QString& module, int zone) {
 }
 void ShellController::toggleSettings() {
     if (settingsView_ && settingsView_->isVisible()) settingsView_->hide(); else openSettings();
+}
+void ShellController::setWorkspaceCount(int count) {
+    if (count == workspaceCount_ || !umbrella::core::validWorkspaceCount(count)) return;
+    const int previous = workspaceCount_;
+    settings_.setValue("panel/workspaceCount", count); settings_.sync();
+    if (settings_.status() != QSettings::NoError) { fail(tr("Не удалось сохранить количество пространств.")); return; }
+    if (!workspaces_.setCount(count)) {
+        workspaces_.setCount(previous);
+        settings_.setValue("panel/workspaceCount", previous); settings_.sync();
+        fail(tr("Не удалось вернуть окна перед изменением количества пространств.")); return;
+    }
+    workspaceCount_ = count; emit changed();
 }
 void ShellController::cycleKeyboard() { if (!actions_.cycleLayout()) fail(tr("Не удалось сменить раскладку активного окна. Проверьте установленные языки и права окна.")); }
 void ShellController::openSound() { if (!actions_.openSound()) fail(tr("Не удалось открыть параметры звука Windows.")); }

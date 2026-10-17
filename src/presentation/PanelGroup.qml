@@ -5,15 +5,16 @@ Grid {
     required property int zone
     property bool vertical: false
     property bool logo: false
+    readonly property var theme: shell.preferences.theme
     columns: vertical ? 1 : 4
     spacing: 6
     component PanelButton: Button {
         width: 26; height: 26
-        font.family: "Segoe UI"; font.pixelSize: 11; font.bold: true
-        icon.width: 15; icon.height: 15; icon.color: "#585365"
-        palette.buttonText: "#585365"
+        font.family: shell.preferences.fontFamily; font.pixelSize: 11; font.bold: true
+        icon.width: 15; icon.height: 15; icon.color: group.theme.ink
+        palette.buttonText: group.theme.ink
         background: Rectangle {
-            radius: 13; color: parent.down ? "#d9263b" : (parent.hovered ? "#efcbd2" : "#dfe1e9")
+            radius: 13; color: parent.down ? group.theme.accent : (parent.hovered ? Qt.tint(group.theme.surface, Qt.rgba(group.theme.accent.r, group.theme.accent.g, group.theme.accent.b, 0.22)) : group.theme.raised)
             Behavior on color { ColorAnimation { duration: 140 } }
         }
     }
@@ -24,29 +25,32 @@ Grid {
         onClicked: shell.toggleSettings()
     }
     Grid {
+        id: spaces
         visible: shell.moduleZones.workspaces === group.zone
-        columns: group.vertical ? 1 : 5; spacing: 2
+        columns: group.vertical ? 1 : shell.workspaceCount; spacing: 2
         property var items: { shell.moduleZones; return shell.workspaceModel(panelId) }
         Repeater {
-            model: parent.items
+            // Keep controls alive when occupancy or unrelated shell properties change.
+            model: shell.workspaceCount
             delegate: Button {
                 id: dot
-                required property var modelData
-                width: modelData.active ? 28 : 20; height: 26
+                required property int index
+                readonly property var modelData: spaces.items[index] || { index: index, active: false, occupied: false }
+                enabled: spaces.items.length === shell.workspaceCount
+                width: 30; height: 26
                 Accessible.name: qsTr("Пространство ") + (modelData.index + 1) + (modelData.active ? qsTr(", активно") : "")
                 background: Rectangle { color: "transparent" }
                 contentItem: Item {
                     Rectangle {
                         anchors.centerIn: parent
-                        width: dot.modelData.active ? 23 : 9; height: 9; radius: 5
-                        color: dot.modelData.active ? "#d9263b" : (dot.modelData.occupied ? "#b96c7a" : "#d4ccd1")
+                        width: dot.modelData.active ? 28 : 12; height: 12; radius: 6
+                        color: dot.modelData.active ? group.theme.accent : (dot.modelData.occupied ? "#aa8791" : "#d4ccd1")
                         scale: dot.hovered ? 1.17 : 1
                         Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         Behavior on color { ColorAnimation { duration: 170 } }
                         Behavior on scale { NumberAnimation { duration: 130 } }
                     }
                 }
-                Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                 onClicked: shell.selectWorkspace(panelId, modelData.index)
             }
         }

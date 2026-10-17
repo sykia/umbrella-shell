@@ -2,6 +2,8 @@
 #include <QObject>
 #include <QSettings>
 #include <QQuickView>
+#include <QTimer>
+#include "Preferences.h"
 #include <memory>
 #include <vector>
 #include "platform/windows/DesktopBar.h"
@@ -16,14 +18,19 @@ class ShellController final : public QObject {
     Q_PROPERTY(QString keyboardLayout READ keyboardLayout NOTIFY changed)
     Q_PROPERTY(QVariantMap moduleZones READ moduleZones NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
+    Q_PROPERTY(int workspaceCount READ workspaceCount WRITE setWorkspaceCount NOTIFY changed)
+    Q_PROPERTY(QObject* preferences READ preferences CONSTANT)
 public:
     explicit ShellController(QObject* parent = nullptr);
     ~ShellController() override;
     bool start();
+    QObject* preferences() { return &preferences_; }
     bool replacement() const { return enabled_; }
     bool startup() const;
     QString status() const { return status_; }
     QString panelEdge() const { return edge_; }
+    int workspaceCount() const { return workspaceCount_; }
+    void setWorkspaceCount(int count);
     void setPanelEdge(const QString& edge);
     QString keyboardLayout() const { return actions_.layout(); }
     QVariantMap moduleZones() const { return zones_; }
@@ -54,9 +61,11 @@ private:
     void fail(const QString& error);
     umbrella::platform::BarEdge nativeEdge() const;
     QSettings settings_;
+    Preferences preferences_;
     umbrella::platform::PanelActions actions_;
     umbrella::platform::MonitorWorkspaces workspaces_;
     QString edge_ = "top";
+    int workspaceCount_ = 5;
     QVariantMap zones_{{"workspaces", 0}, {"keyboard", 0}, {"volume", 2}};
     std::vector<std::unique_ptr<Bar>> bars_;
     std::unique_ptr<QQuickView> settingsView_;
@@ -64,5 +73,7 @@ private:
     bool enabled_ = true;
     bool active_ = false;
     bool rebuilding_ = false;
+    QTimer explorerRefresh_;
+    QTimer topologyRefresh_;
     QString status_;
 };

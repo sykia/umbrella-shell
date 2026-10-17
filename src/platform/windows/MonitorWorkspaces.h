@@ -21,6 +21,7 @@ public:
     bool start(const QString& snapshot);
     bool stop();
     bool running() const;
+    bool setCount(int count);
     QVariantList model(quintptr panel) const;
     bool select(quintptr panel, int index);
     void refresh();
