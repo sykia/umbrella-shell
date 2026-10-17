@@ -12,6 +12,10 @@ if(UMBRELLA_BUILD_APP)
         message(FATAL_ERROR "The host requires Windows x64 and MSVC (Qt msvc2022_64)")
     endif()
     enable_language(RC)
+    # The installer and recovery shortcuts use a flat Windows runtime layout.
+    # Qt's deploy API must use the same bindir, otherwise DLLs go into bin/.
+    set(CMAKE_INSTALL_BINDIR ".")
+    include(GNUInstallDirs)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Qml Quick)
     qt_standard_project_setup(REQUIRES 6.8)
     add_library(umbrella_platform STATIC src/platform/windows/ExplorerRecovery.cpp)
@@ -32,7 +36,10 @@ if(UMBRELLA_BUILD_APP)
         target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /sdl /guard:cf)
     endforeach()
     target_link_options(UmbrellaShell PRIVATE /DYNAMICBASE /NXCOMPAT /guard:cf)
-    install(TARGETS UmbrellaShell RUNTIME DESTINATION .)
+    install(TARGETS UmbrellaShell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # App-local MSVC runtime avoids an elevated VC redistributable installer.
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${CMAKE_INSTALL_BINDIR})
+    include(InstallRequiredSystemLibraries)
     # Deploy only dependencies of the current host. Quick/QML deployment belongs
     # here when a real QML module is introduced, not as an unused plugin bundle.
     qt_generate_deploy_app_script(TARGET UmbrellaShell OUTPUT_SCRIPT deploy_script)
