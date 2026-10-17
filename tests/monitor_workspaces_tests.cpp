@@ -53,6 +53,13 @@ int main(int argc, char** argv) {
     if (!manager.select(reinterpret_cast<quintptr>(panel), 1) || IsWindowVisible(childWindow)) return 1;
     if (!guardian.restore() || !IsWindowVisible(childWindow)) return 1;
     if (!manager.stop() || !IsWindowVisible(childWindow)) return 1;
+    if (!manager.start(QString::fromStdWString(name)) || !manager.select(reinterpret_cast<quintptr>(panel), 4) || IsWindowVisible(childWindow)) return 1;
+    // Invalid counts must not alter visibility; shrinking must recover removed groups.
+    if (manager.setCount(0) || manager.setCount(11) || IsWindowVisible(childWindow)) return 1;
+    if (!manager.setCount(2) || !IsWindowVisible(childWindow)) return 1;
+    const auto resized = manager.model(reinterpret_cast<quintptr>(panel));
+    if (resized.size() != 2 || !resized[0].toMap()["active"].toBool() || !resized[0].toMap()["occupied"].toBool()) return 1;
+    if (manager.select(reinterpret_cast<quintptr>(panel), 2) || !manager.stop()) return 1;
     RemovePropW(panel, L"UmbrellaShell.AppBar"); DestroyWindow(panel);
     std::cout << "Per-monitor workspace model, invalid slots, hide and guardian restore passed\n";
     return 0;

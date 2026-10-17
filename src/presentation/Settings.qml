@@ -8,8 +8,6 @@ Rectangle {
     property int page: 0
     property bool panelExpanded: true
     readonly property var theme: shell.preferences.theme
-    onPageChanged: pageFade.restart()
-    NumberAnimation { id: pageFade; target: content; property: "opacity"; from: 0.35; to: 1; duration: 220; easing.type: Easing.OutCubic }
     readonly property color ink: root.theme.ink
     readonly property var modules: [
         { key: "workspaces", title: qsTr("Рабочие пространства"), icon: "desktop" },

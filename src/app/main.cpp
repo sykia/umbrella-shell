@@ -20,7 +20,8 @@
 int main(int argc, char* argv[]) {
     // Recovery and diagnostics must never initialize a graphics device.
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
-    if (argc > 1 && !smoke) {
+    const bool showSettings = argc == 2 && QByteArray(argv[1]) == "--settings";
+    if (argc > 1 && !smoke && !showSettings) {
         QCoreApplication app(argc, argv);
         QCoreApplication::setOrganizationName("UmbrellaShell");
         QCoreApplication::setApplicationName("UmbrellaShell");
@@ -54,7 +55,7 @@ int main(int argc, char* argv[]) {
         if (args[1] == "--restore-explorer") return umbrella::platform::openExplorer() ? 1 : 0;
         if (args[1] == "--help" || args[1] == "--version") {
             QTextStream(stdout) << "Umbrella Shell " << UMBRELLA_VERSION
-                << "\n--diagnostics --restore-taskbar --restore-explorer\n";
+                << "\n--settings --diagnostics --restore-taskbar --restore-explorer\n";
             return 0;
         }
         return 2;
@@ -110,5 +111,6 @@ int main(int argc, char* argv[]) {
         return app.exec();
     }
     if (!shell.start()) return 1;
+    if (showSettings) shell.openSettings();
     return app.exec();
 }
