@@ -9,10 +9,10 @@
 #include <QTextStream>
 #include <QSGRendererInterface>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QTimer>
 #include <QImage>
 #include <QIcon>
-#include <psapi.h>
 int main(int argc, char* argv[]) {
     // Recovery and diagnostics must never initialize a graphics device.
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
@@ -36,10 +36,9 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         if (args[1] == "--restore-taskbar") {
-            HANDLE stop = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\UmbrellaShell.Recovery");
             QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Shell");
             settings.setValue("shell/replacement", false); settings.sync();
-            if (stop) { SetEvent(stop); CloseHandle(stop); return 0; }
+            if (umbrella::platform::requestTaskbarRecovery()) return 0;
             const bool original = settings.value("recovery/pending", false).toBool()
                 ? settings.value("recovery/autoHide", false).toBool() : false;
             const bool restored = umbrella::platform::setAutoHide(original);
@@ -63,8 +62,10 @@ int main(int argc, char* argv[]) {
     if (smoke) {
         QQuickView bar, settings;
         int frames = 0;
+        bool qmlWarning = false;
         bool graphicsError = false;
         for (auto* view : {&bar, &settings}) {
+            QObject::connect(view->engine(), &QQmlEngine::warnings, &app, [&qmlWarning] { qmlWarning = true; });
             view->rootContext()->setContextProperty("shell", &shell);
             view->setResizeMode(QQuickView::SizeRootObjectToView);
             QObject::connect(view, &QQuickWindow::frameSwapped, &app, [&frames] { ++frames; }, Qt::QueuedConnection);
@@ -76,11 +77,10 @@ int main(int argc, char* argv[]) {
             QImage(":/assets/umbrella.png").isNull()) return 1;
         bar.show(); settings.show();
         QTimer::singleShot(2000, &app, [&] {
-            PROCESS_MEMORY_COUNTERS memory{};
-            GetProcessMemoryInfo(GetCurrentProcess(), &memory, sizeof(memory));
-            QTextStream(stdout) << "UI smoke: frames=" << frames << " workingSetBytes=" << memory.WorkingSetSize
+            const auto memory = umbrella::platform::workingSetBytes();
+            QTextStream(stdout) << "UI smoke: frames=" << frames << " workingSetBytes=" << memory
                 << " backend=" << static_cast<int>(bar.rendererInterface()->graphicsApi()) << '\n';
-            app.exit(!graphicsError && frames >= 2 &&
+            app.exit(!graphicsError && !qmlWarning && memory > 0 && frames >= 2 &&
                 bar.rendererInterface()->graphicsApi() == QSGRendererInterface::Direct3D11 ? 0 : 1);
         });
         return app.exec();

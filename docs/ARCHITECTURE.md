@@ -2,7 +2,9 @@
 
 - `core`: независимые от Qt/Windows политики обновлений.
 - `platform/windows`: Win32 AppBar, состояние автоскрытия, handles процесса
-  восстановления, opt-in HKCU Run и запуск системного Explorer.
+  восстановления, горячая клавиша, системные сообщения, opt-in HKCU Run и запуск системного Explorer.
+  TaskbarSession — Qt Core адаптер; DesktopBar скрывает HWND через pimpl.
+  Win32 handles и Windows headers не выходят в app/core.
 - `app/ShellController`: композиция, QSettings INI, lifecycle окон, guard handshake,
   реакция на изменение экранов, аварийный выход и восстановление.
 - `presentation`: QML панели и настроек; разделы настроек представлены моделью

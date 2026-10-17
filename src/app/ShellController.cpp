@@ -3,7 +3,6 @@
 #include <QQmlContext>
 #include <QScreen>
 #include <QTimer>
-#include <QUuid>
 #include <QDir>
 using namespace umbrella::platform;
 namespace {
@@ -17,25 +16,29 @@ void load(QQuickView& view, ShellController* controller, const QString& name) {
 ShellController::ShellController(QObject* parent) : QObject(parent),
     settings_(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Shell") {
     enabled_ = settings_.value("shell/replacement", true).toBool();
-    connect(&guard_, &QProcess::finished, this, [this](int, QProcess::ExitStatus) {
-        if (active_) { restore(); enabled_ = false; settings_.setValue("shell/replacement", false); settings_.sync(); bars_.clear(); qApp->quit(); }
+    connect(&session_, &TaskbarSession::recoveryRequested, this, [this] {
+        restore(); enabled_ = false;
+        settings_.setValue("shell/replacement", false); settings_.sync();
+        bars_.clear(); qApp->quit();
+    });
+    connect(&session_, &TaskbarSession::sessionEnding, this, &ShellController::restore);
+    connect(&session_, &TaskbarSession::explorerRestarted, this, [this] {
+        if (enabled_) QTimer::singleShot(0, this, [this] { rebuild(); });
+    });
+    connect(&session_, &TaskbarSession::positionChanged, this, [this](quintptr window) {
+        for (auto& bar : bars_) if (bar->native && bar->view->winId() == window)
+            bar->native->position(56, bar->view->devicePixelRatio());
     });
 }
-ShellController::~ShellController() {
-    restore(); bars_.clear();
-    UnregisterHotKey(nullptr, 1); qApp->removeNativeEventFilter(this);
-    if (mutex_) { ReleaseMutex(mutex_); CloseHandle(mutex_); }
-}
+ShellController::~ShellController() { restore(); bars_.clear(); }
 bool ShellController::start() {
-    mutex_ = CreateMutexW(nullptr, TRUE, L"Local\\UmbrellaShell.DesktopBar");
-    if (!mutex_ || GetLastError() == ERROR_ALREADY_EXISTS) return false;
+    if (!session_.acquire()) return false;
     if (settings_.value("recovery/pending", false).toBool()) {
         if (!setAutoHide(settings_.value("recovery/autoHide", false).toBool())) {
             enabled_ = false; fail(tr("Не удалось восстановить состояние предыдущего запуска."));
         } else { settings_.remove("recovery"); settings_.sync(); }
     }
-    qApp->installNativeEventFilter(this);
-    if (!RegisterHotKey(nullptr, 1, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 0x55)) {
+    if (!session_.hotkeyAvailable()) {
         fail(tr("Ctrl+Alt+U занято. Используйте кнопку восстановления или --restore-taskbar."));
     }
     connect(qApp, &QGuiApplication::screenAdded, this, [this](QScreen*) { rebuild(); });
@@ -68,14 +71,9 @@ void ShellController::openSettings() {
 void ShellController::quit() { restore(); qApp->quit(); }
 void ShellController::restore() {
     const bool wasActive = active_; active_ = false;
-    if (stop_) SetEvent(stop_);
-    if (guard_.state() != QProcess::NotRunning) guard_.waitForFinished(5000);
-    if (wasActive) {
-        if (setAutoHide((original_ & ABS_AUTOHIDE) != 0)) { settings_.remove("recovery"); settings_.sync(); }
-        else status_ = tr("Windows не подтвердила восстановление. Выполните --restore-taskbar.");
-    }
-    if (ready_) { CloseHandle(ready_); ready_ = nullptr; }
-    if (stop_) { CloseHandle(stop_); stop_ = nullptr; }
+    if (session_.restore()) {
+        if (wasActive) { settings_.remove("recovery"); settings_.sync(); }
+    } else status_ = tr("Windows не подтвердила восстановление. Выполните --restore-taskbar.");
 }
 void ShellController::rebuild() {
     if (rebuilding_ || !enabled_) return;
@@ -110,42 +108,23 @@ void ShellController::rebuild() {
 void ShellController::activate() {
     if (rebuilding_ || active_ || !enabled_ || bars_.empty()) return;
     for (const auto& bar : bars_) if (!bar->painted) return;
-    original_ = taskbarState();
-    const QString token = "Local\\UmbrellaShell." + QUuid::createUuid().toString(QUuid::Id128);
-    const QString readyName = token + ".ready", stopName = "Local\\UmbrellaShell.Recovery";
-    ready_ = CreateEventW(nullptr, TRUE, FALSE, readyName.toStdWString().c_str());
-    stop_ = CreateEventW(nullptr, TRUE, FALSE, stopName.toStdWString().c_str());
-    if (!ready_ || !stop_) { restore(); fail(tr("Не удалось создать канал восстановления.")); return; }
-    guard_.start(executable(), {"--guard", QString::number(GetCurrentProcessId()), QString::number(original_), readyName, stopName});
-    if (!guard_.waitForStarted(5000) || WaitForSingleObject(ready_, 5000) != WAIT_OBJECT_0) {
+    if (!session_.prepare()) {
         restore(); fail(tr("Процесс восстановления не готов. Панель Windows сохранена.")); return;
     }
-    settings_.setValue("recovery/autoHide", (original_ & ABS_AUTOHIDE) != 0);
+    settings_.setValue("recovery/autoHide", session_.originalAutoHide());
     settings_.setValue("recovery/pending", true); settings_.sync();
     if (settings_.status() != QSettings::NoError) { restore(); fail(tr("Не удалось сохранить журнал восстановления.")); return; }
     active_ = true;
-    if (!setAutoHide(true)) { restore(); fail(tr("Windows отклонила автоскрытие панели.")); return; }
+    if (!session_.hide()) { restore(); fail(tr("Windows отклонила автоскрытие панели.")); return; }
     for (auto& bar : bars_) {
-        bar->native = std::make_unique<DesktopBar>(reinterpret_cast<HWND>(bar->view->winId()));
+        bar->native = std::make_unique<DesktopBar>(bar->view->winId());
         if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio())) {
             restore(); for (auto& item : bars_) item->native.reset();
             fail(tr("Не удалось зарезервировать место панели.")); return;
         }
     }
-    status_ = tr("Панель Umbrella работает. Ctrl+Alt+U — аварийный выход."); emit changed();
-}
-bool ShellController::nativeEventFilter(const QByteArray&, void* message, qintptr*) {
-    auto* msg = static_cast<MSG*>(message);
-    static const UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
-    if (msg->message == taskbarCreated && enabled_) QTimer::singleShot(0, this, [this] { rebuild(); });
-    if (msg->message == WM_HOTKEY && msg->wParam == 1) quit();
-    if (msg->message == WM_QUERYENDSESSION || msg->message == WM_ENDSESSION) restore();
-    if (msg->message == barCallback && msg->wParam == ABN_FULLSCREENAPP) {
-        SetWindowPos(msg->hwnd, msg->lParam ? HWND_BOTTOM : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    }
-    if (msg->message == barCallback && msg->wParam == ABN_POSCHANGED) {
-        for (auto& bar : bars_) if (bar->native && reinterpret_cast<HWND>(bar->view->winId()) == msg->hwnd)
-            bar->native->position(56, bar->view->devicePixelRatio());
-    }
-    return false;
+    status_ = session_.hotkeyAvailable()
+        ? tr("Панель Umbrella работает. Ctrl+Alt+U — аварийный выход.")
+        : tr("Панель Umbrella работает. Ctrl+Alt+U занято; используйте кнопку выхода или --restore-taskbar.");
+    emit changed();
 }

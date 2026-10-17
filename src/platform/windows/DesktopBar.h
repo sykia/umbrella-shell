@@ -1,26 +1,26 @@
 #pragma once
-#include <windows.h>
-#include <shellapi.h>
+#include <cstdint>
+#include <memory>
 #include <string>
 namespace umbrella::platform {
-constexpr UINT barCallback = WM_APP + 31;
 unsigned taskbarState();
 bool setAutoHide(bool enabled);
-int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, const std::wstring& stop,
+bool requestTaskbarRecovery();
+std::uint64_t workingSetBytes();
+int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& ready, const std::wstring& stop,
                  bool (*restore)(bool) = setAutoHide);
 bool setStartup(bool enabled, const std::wstring& executable);
 bool startupEnabled(const std::wstring& executable);
 class DesktopBar {
 public:
-    explicit DesktopBar(HWND window);
+    explicit DesktopBar(std::uintptr_t window);
     ~DesktopBar();
     DesktopBar(const DesktopBar&) = delete;
     DesktopBar& operator=(const DesktopBar&) = delete;
-    bool registered() const { return registered_; }
+    bool registered() const;
     bool position(int logicalHeight, double scale);
 private:
-    HWND window_;
-    bool registered_;
-    bool positioned_ = false;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 }

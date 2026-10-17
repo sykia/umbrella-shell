@@ -1,4 +1,6 @@
 #include "platform/windows/DesktopBar.h"
+#include <windows.h>
+#include <shellapi.h>
 #include <iostream>
 #include <memory>
 using namespace umbrella::platform;
