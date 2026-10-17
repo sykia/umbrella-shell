@@ -38,9 +38,19 @@ SignedUninstaller=yes
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Umbrella Shell diagnostics"; Filename: "{app}\UmbrellaShell.exe"; Parameters: "--diagnostics"
+Name: "{group}\Umbrella Shell"; Filename: "{app}\UmbrellaShell.exe"
+Name: "{group}\Restore Windows taskbar"; Filename: "{app}\UmbrellaShell.exe"; Parameters: "--restore-taskbar"
 Name: "{group}\Open Windows Explorer"; Filename: "{app}\UmbrellaShell.exe"; Parameters: "--restore-explorer"
 Name: "{group}\Uninstall Umbrella Shell"; Filename: "{uninstallexe}"
 
-; No Winlogon, Explorer termination, startup task or user-data deletion.
+; No Winlogon, Explorer termination or user-data deletion. Startup is opt-in in settings.
 ; In-place installation is NOT an atomic updater or a crash rollback mechanism.
+
+[Run]
+Filename: "{app}\UmbrellaShell.exe"; Description: "Launch Umbrella Shell"; Flags: nowait postinstall skipifsilent unchecked
+
+[UninstallRun]
+Filename: "{app}\UmbrellaShell.exe"; Parameters: "--restore-taskbar"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreTaskbar"
+
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "UmbrellaShell"; Flags: uninsdeletevalue
