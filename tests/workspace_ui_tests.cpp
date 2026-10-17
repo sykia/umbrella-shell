@@ -6,6 +6,12 @@
 #include <QTimer>
 #include <iostream>
 
+QQuickItem* findDot(QQuickItem* item, const QString& name) {
+    if (item->objectName() == name) return item;
+    for (auto* child : item->childItems()) if (auto* found = findDot(child, name)) return found;
+    return nullptr;
+}
+
 class PreferencesFixture final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantMap theme READ theme CONSTANT)
@@ -57,15 +63,22 @@ int main(int argc, char** argv) {
     QTimer::singleShot(300, &app, [&] {
         for (int click = 0; click < 30; ++click) {
             const int index = (click + 1) % shell.count;
-            auto* dot = root->findChild<QObject*>("workspaceDot" + QString::number(index));
-            if (!dot || !dot->property("enabled").toBool() || !QMetaObject::invokeMethod(dot, "clicked") || shell.active != index) { app.exit(1); return; }
+            auto* dot = findDot(root, "workspaceDot" + QString::number(index));
+            if (!dot || !dot->property("enabled").toBool() || !QMetaObject::invokeMethod(dot, "clicked") || shell.active != index) {
+                std::cerr << "Click routing failed at " << click << ": dot=" << dot << " active=" << shell.active << " expected=" << index << '\n';
+                app.exit(1); return;
+            }
             // State updates must keep the delegate alive so width/color animations can finish.
             emit shell.changed();
-            if (root->findChild<QObject*>(dot->objectName()) != dot || !dot->property("checked").toBool()) { app.exit(1); return; }
+            if (findDot(root, dot->objectName()) != dot || !dot->property("checked").toBool()) {
+                std::cerr << "Delegate identity or checked binding failed at " << click << '\n'; app.exit(1); return;
+            }
         }
         shell.count = 2; shell.active = 0; emit shell.changed();
-        if (!root->findChild<QObject*>("workspaceDot1") || root->findChild<QObject*>("workspaceDot2")) { app.exit(1); return; }
         QTimer::singleShot(250, &app, [&] {
+            if (!findDot(root, "workspaceDot1") || findDot(root, "workspaceDot2")) {
+                std::cerr << "Delegate count did not settle after resize\n"; app.exit(1); return;
+            }
             std::cout << "Workspace QML: 30 routed clicks, stable delegates and count resize\n";
             app.exit(warnings || shell.clicks != 30 ? 1 : 0);
         });
