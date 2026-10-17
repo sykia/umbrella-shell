@@ -15,9 +15,9 @@ ScrollView {
     ColumnLayout {
         width: page.availableWidth; spacing: 8
         RowLayout {
-            Button { text: "‹"; enabled: page.offset > -89; onClicked: --page.offset }
+            UiButton { text: "‹"; enabled: page.offset > -89; onClicked: --page.offset }
             Caption { text: page.offset === 0 ? qsTr("Сегодня") : page.stats.date; font.bold: true; font.pixelSize: 16; horizontalAlignment: Text.AlignHCenter; Layout.fillWidth: true }
-            Button { text: "›"; enabled: page.offset < 0; onClicked: ++page.offset }
+            UiButton { text: "›"; enabled: page.offset < 0; onClicked: ++page.offset }
         }
         RowLayout {
             Layout.fillWidth: true
@@ -83,9 +83,9 @@ ScrollView {
             }
         }
         Caption { visible: page.stats.apps.length === 0; text: qsTr("Пока нет данных за этот день."); Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter }
-        Switch { text: qsTr("Учитывать активность локально"); checked: page.prefs.tracking; onClicked: page.prefs.tracking = checked; palette.windowText: page.theme.ink; palette.highlight: page.theme.accent }
-        Caption { text: qsTr("Только активное приложение, без заголовков окон. Простой более минуты не учитывается. История — до 90 дней, только на этом компьютере."); wrapMode: Text.WordWrap; Layout.fillWidth: true }
-        Button { text: qsTr("Очистить историю"); onClicked: clearDialog.open() }
+        PillSwitch { Layout.fillWidth: true; text: qsTr("Учитывать активность локально"); checked: page.prefs.tracking; onClicked: page.prefs.tracking = checked }
+        Caption { text: qsTr("Всё время активного окна, включая время без ввода. Блокировка и сон исключаются. Без заголовков окон; история до 90 дней только на этом компьютере."); wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        UiButton { text: qsTr("Очистить историю"); onClicked: clearDialog.open() }
         Caption { text: page.prefs.error; visible: text.length > 0; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: page.theme.accent }
     }
 }

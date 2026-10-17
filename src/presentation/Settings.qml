@@ -15,40 +15,13 @@ Rectangle {
         { key: "volume", title: qsTr("Громкость"), icon: "volume" }
     ]
     component TextLabel: Label { color: root.ink; font.family: shell.preferences.fontFamily; font.pixelSize: 12 }
-    component Action: Button {
+    component Action: UiButton {
         font.family: shell.preferences.fontFamily; font.pixelSize: 11; font.bold: true
         palette.buttonText: root.ink
         background: Rectangle { radius: Math.min(10, shell.preferences.cornerRadius); color: parent.hovered ? Qt.tint(root.theme.surface, Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.22)) : root.theme.raised; Behavior on color { ColorAnimation { duration: 160 } } }
     }
     component Card: Rectangle { radius: Math.min(12, shell.preferences.cornerRadius); color: root.theme.surface }
-    component PillSwitch: Switch {
-        id: control
-        width: parent.width; height: 38
-        leftPadding: 0; rightPadding: 0; spacing: 12
-        font.family: shell.preferences.fontFamily; font.pixelSize: 12
-        indicator: Rectangle {
-            implicitWidth: 46; implicitHeight: 26
-            x: control.width - width
-            y: (control.height - height) / 2
-            radius: height / 2
-            color: !control.enabled ? root.theme.raised : control.checked ? (control.down ? Qt.darker(root.theme.accent, 1.15) : root.theme.accent) : (control.hovered ? root.theme.raised : root.theme.raised)
-            border.width: control.activeFocus ? 2 : 0
-            border.color: Qt.darker(root.theme.accent, 1.15)
-            Behavior on color { ColorAnimation { duration: 160 } }
-            Rectangle {
-                width: control.down ? 23 : 20; height: 20; radius: 10
-                x: control.checked ? parent.width - width - 3 : 3
-                y: 3; color: "white"
-                Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                Behavior on width { NumberAnimation { duration: 120 } }
-            }
-        }
-        contentItem: TextLabel {
-            text: control.text; verticalAlignment: Text.AlignVCenter
-            rightPadding: 58; wrapMode: Text.WordWrap
-            opacity: control.enabled ? 1 : 0.5
-        }
-    }
+
     Rectangle {
         id: sidebar; width: 176; anchors.top: parent.top; anchors.bottom: parent.bottom
         color: root.theme.surface; radius: 16
@@ -126,8 +99,8 @@ Rectangle {
                     Layout.fillWidth: true; implicitHeight: 96
                     Column {
                         anchors.fill: parent; anchors.margins: 10
-                        PillSwitch { text: qsTr("Использовать панель Umbrella"); checked: shell.replacement; onClicked: shell.replacement = checked }
-                        PillSwitch { text: qsTr("Запускать при входе в Windows"); checked: shell.startup; onClicked: shell.startup = checked }
+                        PillSwitch { width: parent.width; text: qsTr("Использовать панель Umbrella"); checked: shell.replacement; onClicked: shell.replacement = checked }
+                        PillSwitch { width: parent.width; text: qsTr("Запускать при входе в Windows"); checked: shell.startup; onClicked: shell.startup = checked }
                     }
                 }
                 TextLabel { text: shell.status; Layout.fillWidth: true; wrapMode: Text.WordWrap }
@@ -143,7 +116,7 @@ Rectangle {
                     Layout.fillWidth: true; implicitHeight: 58
                     TextLabel { x: 12; y: 10; text: qsTr("Расположение панели"); font.bold: true }
                     TextLabel { x: 12; y: 30; text: qsTr("Одинаково на всех мониторах"); font.pixelSize: 10 }
-                    ComboBox {
+                    UiCombo {
                         anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter; width: 130
                         palette.highlight: root.theme.accent
                         model: [qsTr("Сверху"), qsTr("Снизу"), qsTr("Слева"), qsTr("Справа")]
@@ -163,7 +136,7 @@ Rectangle {
                     Layout.fillWidth: true; implicitHeight: 64
                     TextLabel { x: 12; y: 10; text: qsTr("Количество пространств"); font.bold: true }
                     TextLabel { x: 12; y: 34; text: qsTr("При изменении все окна вернутся в первую группу"); font.pixelSize: 10 }
-                    SpinBox {
+                    UiSpin {
                         anchors.right: parent.right; anchors.rightMargin: 10
                         anchors.top: parent.top; anchors.topMargin: 7; width: 110
                         from: 1; to: 10; value: shell.workspaceCount; editable: false

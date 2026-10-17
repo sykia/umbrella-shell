@@ -20,9 +20,9 @@ ScrollView {
         onAccepted: page.prefs.addTheme(customName.text, colorPicker.selectedColor, darkTheme.checked)
         ColumnLayout {
             width: parent.width
-            TextField { id: customName; placeholderText: qsTr("Название"); Layout.fillWidth: true; maximumLength: 40 }
-            Switch { id: darkTheme; text: qsTr("Тёмная основа") }
-            Button { text: qsTr("Цвет акцента"); onClicked: colorPicker.open() }
+            UiField { id: customName; placeholderText: qsTr("Название"); Layout.fillWidth: true; maximumLength: 40 }
+            PillSwitch { id: darkTheme; text: qsTr("Тёмная основа"); Layout.fillWidth: true }
+            UiButton { text: qsTr("Цвет акцента"); onClicked: colorPicker.open() }
         }
     }
     ColumnLayout {
@@ -31,13 +31,13 @@ ScrollView {
             implicitHeight: 124; clip: true
             Image { anchors.fill: parent; source: page.prefs.wallpaper; fillMode: Image.PreserveAspectCrop; asynchronous: true; sourceSize.width: 900 }
             Rectangle { anchors.fill: parent; gradient: Gradient { GradientStop { position: 0.4; color: "transparent" } GradientStop { position: 1; color: "#bb15151a" } } }
-            Button { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 9; text: qsTr("Выбрать обои"); onClicked: wallpaperPicker.open() }
+            UiButton { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 9; text: qsTr("Выбрать обои"); accent: true; onClicked: wallpaperPicker.open() }
             Caption { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 10; width: parent.width / 2; horizontalAlignment: Text.AlignRight; elide: Text.ElideMiddle; text: decodeURIComponent(page.prefs.wallpaper.toString().split('/').pop()); color: "white" }
         }
         Tile {
             implicitHeight: 48
             Caption { x: 10; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Папка с обоями") }
-            Button { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; anchors.rightMargin: 8; width: 230; text: page.prefs.wallpaperFolder.toString() || qsTr("Выбрать папку…"); onClicked: folderPicker.open() }
+            UiButton { anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; anchors.rightMargin: 8; width: 230; text: page.prefs.wallpaperFolder.toString() || qsTr("Выбрать папку…"); onClicked: folderPicker.open() }
         }
         Flow {
             Layout.fillWidth: true; spacing: 6
@@ -57,14 +57,14 @@ ScrollView {
             Caption { x: 10; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Шрифт") }
             RowLayout {
                 anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
-                Button { text: "+"; implicitWidth: 32; onClicked: fontPicker.open(); Accessible.name: qsTr("Загрузить шрифт") }
-                ComboBox { implicitWidth: 215; model: page.prefs.fonts; currentIndex: model.indexOf(page.prefs.fontFamily); onActivated: page.prefs.fontFamily = currentText }
+                UiButton { text: "+"; implicitWidth: 32; onClicked: fontPicker.open(); Accessible.name: qsTr("Загрузить шрифт") }
+                UiCombo { implicitWidth: 215; model: page.prefs.fonts; currentIndex: model.indexOf(page.prefs.fontFamily); onActivated: page.prefs.fontFamily = currentText }
             }
         }
         Tile {
             implicitHeight: 48
             Caption { x: 10; anchors.verticalCenter: parent.verticalCenter; text: qsTr("Радиус скругления") }
-            SpinBox { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; from: 0; to: 28; value: page.prefs.cornerRadius; onValueModified: page.prefs.cornerRadius = value }
+            UiSpin { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; from: 0; to: 28; value: page.prefs.cornerRadius; onValueModified: page.prefs.cornerRadius = value }
         }
         Tile {
             implicitHeight: paletteContent.implicitHeight + 20
@@ -72,8 +72,8 @@ ScrollView {
                 id: paletteContent; anchors.fill: parent; anchors.margins: 10; spacing: 8
                 RowLayout {
                     Caption { text: qsTr("Цветовые темы"); font.bold: true; Layout.fillWidth: true }
-                    Button { text: "+"; implicitWidth: 30; onClicked: customDialog.open(); Accessible.name: qsTr("Создать тему") }
-                    TextField { id: search; placeholderText: qsTr("Поиск тем…"); Layout.preferredWidth: 130 }
+                    UiButton { text: "+"; implicitWidth: 30; onClicked: customDialog.open(); Accessible.name: qsTr("Создать тему") }
+                    UiField { id: search; placeholderText: qsTr("Поиск тем…"); Layout.preferredWidth: 130 }
                 }
                 GridLayout {
                     columns: 2; Layout.fillWidth: true; columnSpacing: 8; rowSpacing: 8

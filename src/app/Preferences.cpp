@@ -99,11 +99,11 @@ void Preferences::setTracking(bool enabled) {
 }
 void Preferences::sample() {
     const auto now = QDate::currentDate();
-    const auto app = umbrella::platform::userRecentlyActive() ? QString::fromStdWString(umbrella::platform::activeApplication()) : QString();
+    const auto app = umbrella::platform::interactiveDesktopAvailable() ? QString::fromStdWString(umbrella::platform::activeApplication()) : QString();
     const qint64 duration = elapsed_.restart();
-    if (!app.isEmpty() && app == lastApp_ && lastDate_ == now && duration > 0 && duration <= 10000) {
+    if (!app.isEmpty() && !lastApp_.isEmpty() && lastDate_ == now && duration > 0 && duration <= 10000) {
         auto day = days_.value(now.toString(Qt::ISODate)).toMap();
-        if (day.contains(app) || day.size() < 100) day[app] = day.value(app).toLongLong() + duration / 1000;
+        if (day.contains(lastApp_) || day.size() < 100) day[lastApp_] = day.value(lastApp_).toLongLong() + duration / 1000;
         days_[now.toString(Qt::ISODate)] = day;
         while (days_.size() > 90) days_.erase(days_.begin());
         unsaved_ += static_cast<int>(duration / 1000);

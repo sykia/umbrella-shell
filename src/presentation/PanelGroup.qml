@@ -20,8 +20,15 @@ Grid {
     }
     PanelButton {
         visible: group.logo
+        padding: 0
         Accessible.name: qsTr("Показать или скрыть настройки Umbrella")
-        contentItem: Image { source: "qrc:/assets/umbrella.png"; sourceSize: Qt.size(32, 32); fillMode: Image.PreserveAspectFit; mipmap: true }
+        contentItem: Item {
+            Image {
+                anchors.centerIn: parent; width: 30; height: 30
+                source: "qrc:/assets/umbrella.png"; sourceSize: Qt.size(128, 128)
+                fillMode: Image.PreserveAspectFit; mipmap: true; smooth: true
+            }
+        }
         onClicked: shell.toggleSettings()
     }
     Grid {
