@@ -1,10 +1,25 @@
-Umbrella Shell development build: Qt Quick/D3D11 Shell Bar with the supplied
-Umbrella logo and settings, monitor/DPI event handling, Windows AppBar workspace
-reservation, opt-in per-user startup and a taskbar recovery process.
+# Примечания к текущей разработке
 
-Windows taskbar windows are additionally hidden with Win32 and observed by an
-out-of-context event hook. Explorer window classes are not a public API contract;
-asynchronous events cannot guarantee zero transient frames on every Windows build. Explorer remains the Windows shell. Automatic updates, Blur,
-transactional installer rollback and a universal zero-flicker guarantee
-are not implemented. See docs/SHELL_BAR.md for verification limits and the
-Windows 11 VM matrix; compilation does not establish production readiness.
+Описание исходников Unreleased, а не объявление нового бинарного релиза.
+
+- Светлая Shell Bar 36 DIP на мониторах, четыре края и собственные SVG-иконки.
+- Настройки 680×440 с красным акцентом и анимациями; логотип показывает/скрывает окно.
+- Перенос модулей между горизонтальными зонами слева/центр/справа, раскладка и параметры звука Windows.
+- Пять собственных групп окон отдельно на каждом мониторе с анимированными индикаторами. Это не виртуальные столы Windows; системные бинды сохраняются.
+- Закрепление панели на краю отдельно от согласования AppBar; подсказки поверх кнопок удалены.
+
+Explorer остаётся системной оболочкой. Guard скрывает окна системных панелей
+и восстанавливает их при выходе/смерти GUI. Классы Explorer не являются публичным
+контрактом: отсутствие краткого появления на всех сборках Windows не гарантируется.
+Ctrl+Alt+U и recovery CLI сохраняются.
+
+Снимок скрытых приложений удерживается GUI/guard в общей памяти. Он покрывает
+смерть GUI при живом guard, но не одновременное завершение обоих процессов.
+Журнал taskbar не восстанавливает такой снимок. Группы ограничены 16 мониторами
+и 256 обычными окнами, исключают elevated/owned/tool/cloaked окна и обновляются
+раз в 500 мс только при включённом модуле.
+
+На 2026-10-17 дальнейшие сборки, тесты и GUI-запуски отложены по запросу владельца.
+Последние изменения не объявляются проверенными на Windows 11. План испытаний:
+[SHELL_BAR.md](SHELL_BAR.md). Blur, автообновления и транзакционный откат установки
+пока не реализованы.
