@@ -11,7 +11,7 @@ bool setAutoHide(bool enabled) {
     SHAppBarMessage(ABM_SETSTATE, &data);
     return ((taskbarState() & ABS_AUTOHIDE) != 0) == enabled;
 }
-int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, const std::wstring& stop) {
+int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, const std::wstring& stop, bool (*restore)(bool)) {
     HANDLE instance = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\UmbrellaShell.DesktopBar");
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, parent);
     HANDLE readyEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, ready.c_str());
@@ -24,9 +24,12 @@ int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, con
         return 1;
     }
     HANDLE waits[]{process, stopEvent};
-    SetEvent(readyEvent);
+    if (!SetEvent(readyEvent)) {
+        CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
+        return 1;
+    }
     const DWORD result = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
-    const bool restored = setAutoHide((original & ABS_AUTOHIDE) != 0);
+    const bool restored = restore((original & ABS_AUTOHIDE) != 0);
     CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
     return result == WAIT_FAILED || !restored ? 1 : 0;
 }

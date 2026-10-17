@@ -6,7 +6,8 @@ namespace umbrella::platform {
 constexpr UINT barCallback = WM_APP + 31;
 unsigned taskbarState();
 bool setAutoHide(bool enabled);
-int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, const std::wstring& stop);
+int guardTaskbar(DWORD parent, unsigned original, const std::wstring& ready, const std::wstring& stop,
+                 bool (*restore)(bool) = setAutoHide);
 bool setStartup(bool enabled, const std::wstring& executable);
 bool startupEnabled(const std::wstring& executable);
 class DesktopBar {
