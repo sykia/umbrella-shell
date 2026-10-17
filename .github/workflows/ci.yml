@@ -41,6 +41,11 @@ jobs:
           name: unsigned-windows-x64-do-not-distribute
           path: dist/*
           if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shell-bar-runtime-development
+          path: stage/**
+          if-no-files-found: error
   core:
     runs-on: ubuntu-24.04
     steps:

@@ -45,6 +45,7 @@ int main(int argc, char**) {
     if (guardTaskbar(process.dwProcessId, 0, readyName, stopName, restoreProbe) != 0 || !matched) return 1;
     const int before = calls;
     if (guardTaskbar(GetCurrentProcessId(), 0, token + L".missing", stopName, restoreProbe) == 0 || calls != before) return 1;
+    if (guardTaskbar(GetCurrentProcessId(), 0, readyName, stopName, restoreProbe, true) == 0 || calls != before) return 1;
     std::cout << "Guard stop, parent death, original modes and failure propagation passed\n";
     return 0;
 }

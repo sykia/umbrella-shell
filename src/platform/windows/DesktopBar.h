@@ -8,7 +8,7 @@ bool setAutoHide(bool enabled);
 bool requestTaskbarRecovery();
 std::uint64_t workingSetBytes();
 int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& ready, const std::wstring& stop,
-                 bool (*restore)(bool) = setAutoHide);
+                 bool (*restore)(bool) = setAutoHide, bool suppress = false);
 bool setStartup(bool enabled, const std::wstring& executable);
 bool startupEnabled(const std::wstring& executable);
 class DesktopBar {

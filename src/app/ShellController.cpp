@@ -1,4 +1,5 @@
 #include "ShellController.h"
+#include "platform/windows/TaskbarVisibility.h"
 #include <QGuiApplication>
 #include <QQmlContext>
 #include <QScreen>
@@ -34,7 +35,7 @@ ShellController::~ShellController() { restore(); bars_.clear(); }
 bool ShellController::start() {
     if (!session_.acquire()) return false;
     if (settings_.value("recovery/pending", false).toBool()) {
-        if (!setAutoHide(settings_.value("recovery/autoHide", false).toBool())) {
+        if (!restoreTaskbarWindows() || !setAutoHide(settings_.value("recovery/autoHide", false).toBool())) {
             enabled_ = false; fail(tr("Не удалось восстановить состояние предыдущего запуска."));
         } else { settings_.remove("recovery"); settings_.sync(); }
     }
@@ -115,7 +116,7 @@ void ShellController::activate() {
     settings_.setValue("recovery/pending", true); settings_.sync();
     if (settings_.status() != QSettings::NoError) { restore(); fail(tr("Не удалось сохранить журнал восстановления.")); return; }
     active_ = true;
-    if (!session_.hide()) { restore(); fail(tr("Windows отклонила автоскрытие панели.")); return; }
+    if (!session_.hide()) { restore(); fail(tr("Не удалось подтвердить скрытие панелей Windows.")); return; }
     for (auto& bar : bars_) {
         bar->native = std::make_unique<DesktopBar>(bar->view->winId());
         if (!bar->native->registered() || !bar->native->position(56, bar->view->devicePixelRatio())) {

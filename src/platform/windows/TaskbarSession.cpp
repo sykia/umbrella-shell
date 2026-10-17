@@ -1,5 +1,6 @@
 #include "TaskbarSession.h"
 #include "DesktopBar.h"
+#include "TaskbarVisibility.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QProcess>
@@ -13,7 +14,7 @@ using Handle = std::unique_ptr<void, Close>;
 constexpr UINT barCallback = WM_APP + 31;
 }
 struct TaskbarSession::Impl {
-    Handle instance, ready, stop;
+    Handle instance, ready, stop, arm, applied;
     QProcess guard;
     unsigned original = 0;
     bool active = false, hotkey = false, installed = false, acquired = false;
@@ -46,9 +47,11 @@ bool TaskbarSession::prepare() {
     const QString readyName = token + ".ready", stopName = "Local\\UmbrellaShell.Recovery";
     impl_->ready.reset(CreateEventW(nullptr, TRUE, FALSE, readyName.toStdWString().c_str()));
     impl_->stop.reset(CreateEventW(nullptr, TRUE, FALSE, stopName.toStdWString().c_str()));
-    if (!impl_->ready || !impl_->stop) { restore(); return false; }
+    impl_->arm.reset(CreateEventW(nullptr, TRUE, FALSE, (readyName + ".arm").toStdWString().c_str()));
+    impl_->applied.reset(CreateEventW(nullptr, TRUE, FALSE, (readyName + ".applied").toStdWString().c_str()));
+    if (!impl_->ready || !impl_->stop || !impl_->arm || !impl_->applied) { restore(); return false; }
     impl_->guard.start(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()),
-        {"--guard", QString::number(GetCurrentProcessId()), QString::number(impl_->original), readyName, stopName});
+        {"--guard", QString::number(GetCurrentProcessId()), QString::number(impl_->original), readyName, stopName, "suppress"});
     if (!impl_->guard.waitForStarted(5000) || WaitForSingleObject(impl_->ready.get(), 5000) != WAIT_OBJECT_0) {
         restore(); return false;
     }
@@ -56,15 +59,16 @@ bool TaskbarSession::prepare() {
 }
 bool TaskbarSession::hide() {
     impl_->active = true;
-    return setAutoHide(true);
+    if (!setAutoHide(true) || !SetEvent(impl_->arm.get())) return false;
+    return WaitForSingleObject(impl_->applied.get(), 5000) == WAIT_OBJECT_0;
 }
 bool TaskbarSession::restore() {
     const bool wasActive = impl_->active; impl_->active = false;
     if (impl_->stop) SetEvent(impl_->stop.get());
     const bool stopped = impl_->guard.state() == QProcess::NotRunning || impl_->guard.waitForFinished(5000);
-    const bool restored = !wasActive || setAutoHide(originalAutoHide());
+    const bool restored = !wasActive || (restoreTaskbarWindows() && setAutoHide(originalAutoHide()));
     // Do not start another guardian while the old one can still restore stale state.
-    if (stopped) { impl_->ready.reset(); impl_->stop.reset(); }
+    if (stopped) { impl_->ready.reset(); impl_->stop.reset(); impl_->arm.reset(); impl_->applied.reset(); }
     return stopped && restored;
 }
 bool TaskbarSession::nativeEventFilter(const QByteArray&, void* message, qintptr*) {

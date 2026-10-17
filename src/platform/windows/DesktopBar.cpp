@@ -1,4 +1,5 @@
 #include "DesktopBar.h"
+#include "TaskbarVisibility.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <psapi.h>
@@ -32,7 +33,7 @@ bool setAutoHide(bool enabled) {
     SHAppBarMessage(ABM_SETSTATE, &data);
     return ((taskbarState() & ABS_AUTOHIDE) != 0) == enabled;
 }
-int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& ready, const std::wstring& stop, bool (*restore)(bool)) {
+int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& ready, const std::wstring& stop, bool (*restore)(bool), bool suppress) {
     HANDLE instance = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\UmbrellaShell.DesktopBar");
     HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, parent);
     HANDLE readyEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, ready.c_str());
@@ -44,15 +45,47 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
         if (stopEvent) CloseHandle(stopEvent);
         return 1;
     }
-    HANDLE waits[]{process, stopEvent};
+    TaskbarVisibility visibility;
+    HANDLE arm = nullptr, applied = nullptr;
+    if (suppress) {
+        arm = OpenEventW(SYNCHRONIZE, FALSE, (ready + L".arm").c_str());
+        applied = OpenEventW(EVENT_MODIFY_STATE, FALSE, (ready + L".applied").c_str());
+        if (!arm || !applied || !visibility.install()) {
+            if (arm) CloseHandle(arm);
+            if (applied) CloseHandle(applied);
+            CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
+            return 1;
+        }
+    }
+    HANDLE waits[]{process, stopEvent, arm};
     if (!SetEvent(readyEvent)) {
+        if (arm) CloseHandle(arm);
+        if (applied) CloseHandle(applied);
         CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
         return 1;
     }
-    const DWORD result = WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+    DWORD result = WAIT_FAILED;
+    bool armed = false;
+    for (;;) {
+        result = suppress ? MsgWaitForMultipleObjects(armed ? 2 : 3, waits, FALSE, INFINITE, QS_ALLINPUT)
+                          : WaitForMultipleObjects(2, waits, FALSE, INFINITE);
+        if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1 || result == WAIT_FAILED) break;
+        if (suppress && !armed && result == WAIT_OBJECT_0 + 2) {
+            armed = true;
+            if (!visibility.hide() || !SetEvent(applied)) { result = WAIT_FAILED; break; }
+        } else if (suppress) {
+            MSG message{};
+            while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&message); DispatchMessageW(&message);
+            }
+        }
+    }
+    const bool shown = visibility.restore();
+    if (arm) CloseHandle(arm);
+    if (applied) CloseHandle(applied);
     const bool restored = restore((original & ABS_AUTOHIDE) != 0);
     CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
-    return result == WAIT_FAILED || !restored ? 1 : 0;
+    return result == WAIT_FAILED || !restored || !shown ? 1 : 0;
 }
 namespace {
 constexpr auto runKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";

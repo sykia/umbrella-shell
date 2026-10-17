@@ -1,5 +1,6 @@
 #include "Version.h"
 #include "ShellController.h"
+#include "platform/windows/TaskbarVisibility.h"
 #include "platform/windows/ExplorerRecovery.h"
 #include <QCoreApplication>
 #include <QGuiApplication>
@@ -21,14 +22,15 @@ int main(int argc, char* argv[]) {
         QCoreApplication::setOrganizationName("UmbrellaShell");
         QCoreApplication::setApplicationName("UmbrellaShell");
         const auto args = app.arguments();
-        if (args.size() == 6 && args[1] == "--guard") {
+        if ((args.size() == 6 || (args.size() == 7 && args[6] == "suppress")) && args[1] == "--guard") {
             bool pidOk = false, stateOk = false;
             const auto pid = args[2].toULong(&pidOk);
             const auto state = args[3].toUInt(&stateOk);
             if (!pidOk || !stateOk || !pid || state > 3) return 2;
-            return umbrella::platform::guardTaskbar(pid, state, args[4].toStdWString(), args[5].toStdWString());
+            return umbrella::platform::guardTaskbar(pid, state, args[4].toStdWString(), args[5].toStdWString(), umbrella::platform::setAutoHide, args.size() == 7);
         }
         if (args.size() != 2) return 2;
+        if (args[1] == "--taskbar-status") { QTextStream(stdout) << QString::fromStdString(umbrella::platform::taskbarStatusJson()) << "\n"; return 0; }
         if (args[1] == "--diagnostics") {
             QTextStream(stdout) << QJsonDocument(QJsonObject{{"version", UMBRELLA_VERSION},
                 {"qtVersion", qVersion()}, {"updatesEnabled", false}, {"shellBarAvailable", true},
@@ -41,7 +43,8 @@ int main(int argc, char* argv[]) {
             if (umbrella::platform::requestTaskbarRecovery()) return 0;
             const bool original = settings.value("recovery/pending", false).toBool()
                 ? settings.value("recovery/autoHide", false).toBool() : false;
-            const bool restored = umbrella::platform::setAutoHide(original);
+            const bool shown = umbrella::platform::restoreTaskbarWindows();
+            const bool restored = umbrella::platform::setAutoHide(original) && shown;
             if (restored) { settings.remove("recovery"); settings.sync(); }
             return restored ? 0 : 1;
         }

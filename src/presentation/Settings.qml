@@ -21,7 +21,7 @@ Rectangle {
                 CheckBox { text: qsTr("Использовать панель Umbrella"); checked: shell.replacement; onClicked: shell.replacement = checked }
                 CheckBox { text: qsTr("Запускать при входе в Windows"); checked: shell.startup; onClicked: shell.startup = checked }
                 Label { text: shell.status; Layout.fillWidth: true; wrapMode: Text.WordWrap }
-                Label { text: qsTr("Панель Windows доступна у края экрана.\nCtrl+Alt+U — закрыть Umbrella и восстановить Windows."); Layout.fillWidth: true; wrapMode: Text.WordWrap }
+                Label { text: qsTr("Панели Windows скрываются на время работы Umbrella.\nCtrl+Alt+U — закрыть Umbrella и восстановить Windows."); Layout.fillWidth: true; wrapMode: Text.WordWrap }
                 Item { Layout.fillHeight: true }
                 Button { text: qsTr("Восстановить Windows и выйти"); onClicked: shell.quit() }
             }
