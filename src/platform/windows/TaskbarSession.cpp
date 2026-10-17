@@ -1,6 +1,7 @@
 #include "TaskbarSession.h"
 #include "DesktopBar.h"
 #include "TaskbarVisibility.h"
+#include "MonitorWorkspaces.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QProcess>
@@ -16,6 +17,8 @@ constexpr UINT barCallback = WM_APP + 31;
 struct TaskbarSession::Impl {
     Handle instance, ready, stop, arm, applied;
     QProcess guard;
+    WorkspaceSnapshot workspace;
+    QString workspaceName;
     unsigned original = 0;
     bool active = false, hotkey = false, installed = false, acquired = false;
 };
@@ -43,6 +46,7 @@ bool TaskbarSession::acquire() {
 }
 bool TaskbarSession::hotkeyAvailable() const { return impl_->hotkey; }
 bool TaskbarSession::originalAutoHide() const { return (impl_->original & ABS_AUTOHIDE) != 0; }
+QString TaskbarSession::workspaceSnapshotName() const { return impl_->workspaceName; }
 bool TaskbarSession::prepare() {
     if (!restore()) return false;
     impl_->original = taskbarState();
@@ -53,6 +57,8 @@ bool TaskbarSession::prepare() {
     impl_->arm.reset(CreateEventW(nullptr, TRUE, FALSE, (readyName + ".arm").toStdWString().c_str()));
     impl_->applied.reset(CreateEventW(nullptr, TRUE, FALSE, (readyName + ".applied").toStdWString().c_str()));
     if (!impl_->ready || !impl_->stop || !impl_->arm || !impl_->applied) { restore(); return false; }
+    impl_->workspaceName = readyName + ".workspaces";
+    if (!impl_->workspace.open(impl_->workspaceName.toStdWString(), true)) { restore(); return false; }
     impl_->guard.start(QDir::toNativeSeparators(QCoreApplication::applicationFilePath()),
         {"--guard", QString::number(GetCurrentProcessId()), QString::number(impl_->original), readyName, stopName, "suppress"});
     if (!impl_->guard.waitForStarted(5000) || WaitForSingleObject(impl_->ready.get(), 5000) != WAIT_OBJECT_0) {
@@ -86,8 +92,19 @@ bool TaskbarSession::nativeEventFilter(const QByteArray&, void* message, qintptr
     if (msg->message == taskbarCreated) emit explorerRestarted();
     if (msg->message == WM_HOTKEY && msg->wParam == 1) emit recoveryRequested();
     if (msg->message == WM_QUERYENDSESSION || msg->message == WM_ENDSESSION) emit sessionEnding();
-    if (msg->message == barCallback && msg->wParam == ABN_FULLSCREENAPP)
-        SetWindowPos(msg->hwnd, msg->lParam ? HWND_BOTTOM : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (msg->message == barCallback && msg->wParam == ABN_FULLSCREENAPP) {
+        const HWND foreground = GetForegroundWindow();
+        DWORD pid = 0; GetWindowThreadProcessId(foreground, &pid);
+        RECT rect{}; MONITORINFO monitor{sizeof(monitor)};
+        wchar_t foregroundClass[64]{}; GetClassNameW(foreground, foregroundClass, 64);
+        const bool shellWindow = !wcscmp(foregroundClass, L"Progman") || !wcscmp(foregroundClass, L"WorkerW") ||
+            !wcscmp(foregroundClass, L"Shell_TrayWnd") || !wcscmp(foregroundClass, L"Shell_SecondaryTrayWnd");
+        const bool fullscreen = !shellWindow && msg->lParam && foreground && pid != GetCurrentProcessId() &&
+            GetWindowRect(foreground, &rect) && GetMonitorInfoW(MonitorFromWindow(msg->hwnd, MONITOR_DEFAULTTONEAREST), &monitor) &&
+            rect.left <= monitor.rcMonitor.left && rect.top <= monitor.rcMonitor.top &&
+            rect.right >= monitor.rcMonitor.right && rect.bottom >= monitor.rcMonitor.bottom;
+        SetWindowPos(msg->hwnd, fullscreen ? HWND_NOTOPMOST : HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     if (msg->message == barCallback && msg->wParam == ABN_POSCHANGED)
         emit positionChanged(reinterpret_cast<quintptr>(msg->hwnd));
     return false;

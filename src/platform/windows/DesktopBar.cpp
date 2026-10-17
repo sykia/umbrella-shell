@@ -1,5 +1,6 @@
 #include "DesktopBar.h"
 #include "TaskbarVisibility.h"
+#include "MonitorWorkspaces.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <psapi.h>
@@ -48,11 +49,12 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
         return 1;
     }
     TaskbarVisibility visibility;
+    WorkspaceSnapshot workspace;
     HANDLE arm = nullptr, applied = nullptr;
     if (suppress) {
         arm = OpenEventW(SYNCHRONIZE, FALSE, (ready + L".arm").c_str());
         applied = OpenEventW(EVENT_MODIFY_STATE, FALSE, (ready + L".applied").c_str());
-        if (!arm || !applied || !visibility.install()) {
+        if (!arm || !applied || !visibility.install() || !workspace.open(ready + L".workspaces", false)) {
             if (arm) CloseHandle(arm);
             if (applied) CloseHandle(applied);
             CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
@@ -83,13 +85,14 @@ int guardTaskbar(std::uint32_t parent, unsigned original, const std::wstring& re
             if (!visibility.healthy()) { std::fputs("guard: event suppression failed\n", stderr); result = WAIT_FAILED; break; }
         }
     }
+    const bool windowsRestored = workspace.restore();
     const bool shown = visibility.restore();
     if (arm) CloseHandle(arm);
     if (applied) CloseHandle(applied);
     const bool restored = restore((original & ABS_AUTOHIDE) != 0);
     CloseHandle(stopEvent); CloseHandle(readyEvent); CloseHandle(process); CloseHandle(instance);
     if (result == WAIT_FAILED) std::fprintf(stderr, "guard: wait/suppression failure (%lu)\n", GetLastError());
-    return result == WAIT_FAILED || !restored || !shown ? 1 : 0;
+    return result == WAIT_FAILED || !restored || !shown || !windowsRestored ? 1 : 0;
 }
 namespace {
 constexpr auto runKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -140,6 +143,15 @@ bool DesktopBar::position(int logicalHeight, double scale, BarEdge edge) {
     if (!state.registered_ || !GetMonitorInfoW(MonitorFromWindow(state.window_, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
     APPBARDATA data{sizeof(data)}; data.hWnd = state.window_; data.uEdge = static_cast<UINT>(edge); data.rc = monitor.rcMonitor;
     const LONG height = static_cast<LONG>(std::lround(logicalHeight * scale));
+    switch (edge) {
+    case BarEdge::Top: data.rc.bottom = data.rc.top + height; break;
+    case BarEdge::Bottom: data.rc.top = data.rc.bottom - height; break;
+    case BarEdge::Left: data.rc.right = data.rc.left + height; break;
+    case BarEdge::Right: data.rc.left = data.rc.right - height; break;
+    }
+    const RECT anchored = data.rc;
+    RECT current{};
+    if (GetWindowRect(state.window_, &current) && EqualRect(&current, &anchored) && state.positioned_) return true;
     SHAppBarMessage(ABM_QUERYPOS, &data);
     switch (edge) {
     case BarEdge::Top: data.rc.bottom = data.rc.top + height; break;
@@ -147,11 +159,9 @@ bool DesktopBar::position(int logicalHeight, double scale, BarEdge edge) {
     case BarEdge::Left: data.rc.right = data.rc.left + height; break;
     case BarEdge::Right: data.rc.left = data.rc.right - height; break;
     }
-    RECT current{};
-    if (GetWindowRect(state.window_, &current) && EqualRect(&current, &data.rc) && state.positioned_) return true;
     SHAppBarMessage(ABM_SETPOS, &data);
     state.positioned_ = true;
-    return SetWindowPos(state.window_, HWND_TOPMOST, data.rc.left, data.rc.top,
-        data.rc.right - data.rc.left, data.rc.bottom - data.rc.top, SWP_NOACTIVATE) != FALSE;
+    return SetWindowPos(state.window_, HWND_TOPMOST, anchored.left, anchored.top,
+        anchored.right - anchored.left, anchored.bottom - anchored.top, SWP_NOACTIVATE) != FALSE;
 }
 }

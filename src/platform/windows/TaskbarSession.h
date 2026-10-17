@@ -15,6 +15,7 @@ public:
     bool hide();
     bool restore();
     bool originalAutoHide() const;
+    QString workspaceSnapshotName() const;
     bool nativeEventFilter(const QByteArray&, void*, qintptr*) override;
 signals:
     void recoveryRequested();

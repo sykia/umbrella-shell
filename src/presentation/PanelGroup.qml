@@ -16,21 +16,40 @@ Grid {
             radius: 13; color: parent.down ? "#d9263b" : (parent.hovered ? "#efcbd2" : "#dfe1e9")
             Behavior on color { ColorAnimation { duration: 140 } }
         }
-        ToolTip.visible: hovered
     }
     PanelButton {
         visible: group.logo
         Accessible.name: qsTr("Показать или скрыть настройки Umbrella")
-        ToolTip.text: Accessible.name
         contentItem: Image { source: "qrc:/assets/umbrella.png"; sourceSize: Qt.size(32, 32); fillMode: Image.PreserveAspectFit; mipmap: true }
         onClicked: shell.toggleSettings()
     }
     Grid {
         visible: shell.moduleZones.workspaces === group.zone
-        columns: group.vertical ? 1 : 3; spacing: 3
-        PanelButton { icon.source: "qrc:/assets/icons/previous.svg"; Accessible.name: qsTr("Предыдущий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(-1) }
-        PanelButton { icon.source: "qrc:/assets/icons/desktop.svg"; Accessible.name: qsTr("Все рабочие столы"); ToolTip.text: Accessible.name; onClicked: shell.showDesktops() }
-        PanelButton { icon.source: "qrc:/assets/icons/next.svg"; Accessible.name: qsTr("Следующий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(1) }
+        columns: group.vertical ? 1 : 5; spacing: 2
+        property var items: { shell.moduleZones; return shell.workspaceModel(panelId) }
+        Repeater {
+            model: parent.items
+            delegate: Button {
+                id: dot
+                required property var modelData
+                width: modelData.active ? 28 : 20; height: 26
+                Accessible.name: qsTr("Пространство ") + (modelData.index + 1) + (modelData.active ? qsTr(", активно") : "")
+                background: Rectangle { color: "transparent" }
+                contentItem: Item {
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: dot.modelData.active ? 23 : 9; height: 9; radius: 5
+                        color: dot.modelData.active ? "#d9263b" : (dot.modelData.occupied ? "#b96c7a" : "#d4ccd1")
+                        scale: dot.hovered ? 1.17 : 1
+                        Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        Behavior on color { ColorAnimation { duration: 170 } }
+                        Behavior on scale { NumberAnimation { duration: 130 } }
+                    }
+                }
+                Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                onClicked: shell.selectWorkspace(panelId, modelData.index)
+            }
+        }
     }
     PanelButton {
         visible: shell.moduleZones.keyboard === group.zone
@@ -39,7 +58,6 @@ Grid {
         icon.source: group.vertical ? "" : "qrc:/assets/icons/keyboard.svg"
         leftPadding: 6; rightPadding: 6; spacing: 4
         Accessible.name: qsTr("Сменить раскладку клавиатуры: ") + text
-        ToolTip.text: Accessible.name
         onClicked: shell.cycleKeyboard()
     }
     PanelButton {
@@ -48,7 +66,7 @@ Grid {
         text: group.vertical ? "" : qsTr("Звук")
         leftPadding: 6; rightPadding: 6; spacing: 4
         icon.source: "qrc:/assets/icons/volume.svg"
-        Accessible.name: qsTr("Параметры громкости Windows"); ToolTip.text: Accessible.name
+        Accessible.name: qsTr("Параметры громкости Windows");
         onClicked: shell.openSound()
     }
 }

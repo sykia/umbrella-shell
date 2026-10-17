@@ -124,39 +124,13 @@ Rectangle {
                 }
                 Card {
                     Layout.fillWidth: true; implicitHeight: config.implicitHeight + 22
-                    ColumnLayout {
-                        id: config; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 11; spacing: 7
-                        TextLabel { text: qsTr("Конфигурация панели"); font.bold: true }
-                        TextLabel { text: qsTr("Нажмите модуль для переноса в следующую зону. ПКМ — убрать в доступные."); Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: 10 }
-                        Repeater {
-                            model: [qsTr("Доступные"), qsTr("Слева"), qsTr("По центру"), qsTr("Справа")]
-                            delegate: Rectangle {
-                                required property string modelData
-                                required property int index
-                                readonly property int zone: index - 1
-                                Layout.fillWidth: true; implicitHeight: chips.implicitHeight + 28; radius: 10; color: "#f7f2f3"; border.color: "#dfd1d6"
-                                TextLabel { x: 9; y: 5; text: modelData; font.pixelSize: 10; font.bold: true }
-                                Flow {
-                                    id: chips; x: 8; y: 23; width: parent.width - 16; spacing: 5
-                                    Repeater {
-                                        model: root.modules
-                                        delegate: Action {
-                                            required property var modelData
-                                            visible: shell.moduleZones[modelData.key] === zone
-                                            text: modelData.title
-                                            icon.source: "qrc:/assets/icons/" + modelData.icon + ".svg"
-                                            icon.color: root.ink; icon.width: 14; icon.height: 14
-                                            height: 27; width: implicitWidth + 12
-                                            onClicked: shell.setModuleZone(modelData.key, zone === 2 ? -1 : zone + 1)
-                                            MouseArea { anchors.fill: parent; acceptedButtons: Qt.RightButton; onClicked: shell.setModuleZone(modelData.key, -1) }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    ModuleConfiguration {
+                        id: config
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 11
+                        modules: root.modules; dragSurface: dragOverlay
                     }
                 }
-                TextLabel { text: qsTr("Рабочие столы: кнопки ‹ / › и обзор. Штатные Win+Ctrl+←/→ и Win+цифры сохраняются."); Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: 10 }
+                TextLabel { text: qsTr("Кружки — группы окон Umbrella на каждом мониторе. Заполненный — есть окна, красный — активен. Системные бинды Windows не меняются."); Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: 10 }
             }
         }
         ColumnLayout {
@@ -168,4 +142,5 @@ Rectangle {
             Action { text: qsTr("Общие настройки"); Layout.alignment: Qt.AlignHCenter; height: 32; onClicked: root.page = 1 }
         }
     }
+    Item { id: dragOverlay; anchors.fill: parent; z: 1000 }
 }

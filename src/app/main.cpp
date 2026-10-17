@@ -74,6 +74,7 @@ int main(int argc, char* argv[]) {
         for (auto* view : {&bar, &settings}) {
             QObject::connect(view->engine(), &QQmlEngine::warnings, &app, [&qmlWarning] { qmlWarning = true; });
             view->rootContext()->setContextProperty("shell", &shell);
+            view->rootContext()->setContextProperty("panelId", "0");
             view->setResizeMode(QQuickView::SizeRootObjectToView);
             QObject::connect(view, &QQuickWindow::frameSwapped, &app, [&frames] { ++frames; }, Qt::QueuedConnection);
             QObject::connect(view, &QQuickWindow::sceneGraphError, &app, [&graphicsError] { graphicsError = true; });
