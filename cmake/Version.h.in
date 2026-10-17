@@ -1,0 +1,2 @@
+#pragma once
+#define UMBRELLA_VERSION "@PROJECT_VERSION@"

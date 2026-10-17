@@ -1,0 +1,53 @@
+name: Build and package foundation
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco upgrade innosetup --version=6.4.3 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup provisioning failed' }
+      - name: Validate foundation
+        shell: pwsh
+        run: |
+          ./scripts/Test-Foundation.ps1
+          ./scripts/Test-PublicRepository.ps1
+      - name: Build, test, deploy and compile unsigned installer
+        shell: pwsh
+        run: ./scripts/Build-Package.ps1
+      - name: Test deployed host without Qt development paths
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
+          & ./stage/UmbrellaShell.exe --diagnostics
+          if ($LASTEXITCODE -ne 0) { throw 'Deployed host failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-windows-x64-do-not-distribute
+          path: dist/*
+          if-no-files-found: error
+  core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: cmake -S . -B build/core -DUMBRELLA_BUILD_APP=OFF -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build/core
+      - run: ctest --test-dir build/core --output-on-failure

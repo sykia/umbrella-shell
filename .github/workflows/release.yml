@@ -1,0 +1,71 @@
+name: Signed GitHub Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: signed-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-2022
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate version tag
+        shell: pwsh
+        run: |
+          $content = Get-Content CMakeLists.txt -Raw
+          if ($content -notmatch 'project\(UmbrellaShell VERSION (\d+\.\d+\.\d+)') { throw 'No version' }
+          if ($env:GITHUB_REF_NAME -cne "v$($Matches[1])") { throw 'Tag must match CMake project version; Beta publishing is not enabled yet.' }
+      - uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco upgrade innosetup --version=6.4.3 --allow-downgrade --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup provisioning failed' }
+      - name: Import release certificate
+        shell: pwsh
+        env:
+          CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (!$env:CERTIFICATE -or !$env:CERTIFICATE_PASSWORD) { throw 'Release signing is mandatory.' }
+          $certFile = Join-Path $env:RUNNER_TEMP 'umbrella-signing.pfx'
+          [IO.File]::WriteAllBytes($certFile, [Convert]::FromBase64String($env:CERTIFICATE))
+          try {
+            $password = ConvertTo-SecureString $env:CERTIFICATE_PASSWORD -AsPlainText -Force
+            $cert = Import-PfxCertificate -FilePath $certFile -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            "UMBRELLA_SIGN_CERT_SHA1=$($cert.Thumbprint)" >> $env:GITHUB_ENV
+          } finally { Remove-Item -LiteralPath $certFile -Force }
+          $tool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+          if (!$tool) { throw 'Windows SDK signing tool missing' }
+          $tool.DirectoryName >> $env:GITHUB_PATH
+      - name: Build and sign application, uninstaller and setup
+        shell: pwsh
+        run: |
+          ./scripts/Test-Foundation.ps1
+          ./scripts/Test-PublicRepository.ps1
+          ./scripts/Build-Package.ps1 -Signed
+      - name: Publish foundation release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" ./dist/* --verify-tag --title "Umbrella Shell $env:GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+      - name: Remove signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:UMBRELLA_SIGN_CERT_SHA1) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:UMBRELLA_SIGN_CERT_SHA1" -Force -ErrorAction SilentlyContinue
+          }
