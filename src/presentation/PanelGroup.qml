@@ -25,7 +25,7 @@ Grid {
         visible: shell.moduleZones.workspaces === group.zone
         columns: group.vertical ? 1 : 3; spacing: 3
         PanelButton { text: "‹"; Accessible.name: qsTr("Предыдущий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(-1) }
-        PanelButton { text: "▦"; Accessible.name: qsTr("Все рабочие столы"); ToolTip.text: Accessible.name; onClicked: shell.showDesktops() }
+        PanelButton { text: "\uE7F4"; font.family: "Segoe MDL2 Assets"; Accessible.name: qsTr("Все рабочие столы"); ToolTip.text: Accessible.name; onClicked: shell.showDesktops() }
         PanelButton { text: "›"; Accessible.name: qsTr("Следующий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(1) }
     }
     PanelButton {
@@ -37,7 +37,7 @@ Grid {
     }
     PanelButton {
         visible: shell.moduleZones.volume === group.zone
-        text: "♪"; Accessible.name: qsTr("Параметры громкости Windows"); ToolTip.text: Accessible.name
+        text: "\uE767"; font.family: "Segoe MDL2 Assets"; Accessible.name: qsTr("Параметры громкости Windows"); ToolTip.text: Accessible.name
         onClicked: shell.openSound()
     }
 }

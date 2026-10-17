@@ -22,7 +22,8 @@ Rectangle {
     component Card: Rectangle { radius: 12; color: "#e1e4ec" }
     Rectangle {
         id: sidebar; width: 176; anchors.top: parent.top; anchors.bottom: parent.bottom
-        color: "#e1e4ec"
+        color: "#e1e4ec"; radius: 16
+        Rectangle { anchors.right: parent.right; width: 16; height: parent.height; color: "#e1e4ec" }
         Column {
             anchors.fill: parent; anchors.margins: 10; spacing: 5
             Item {

@@ -16,6 +16,7 @@
 #include <QIcon>
 #include <QDir>
 #include <QQuickItem>
+#include <functional>
 int main(int argc, char* argv[]) {
     // Recovery and diagnostics must never initialize a graphics device.
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
@@ -82,26 +83,29 @@ int main(int argc, char* argv[]) {
         if (bar.status() == QQuickView::Error || settings.status() == QQuickView::Error ||
             QImage(":/assets/umbrella.png").isNull()) return 1;
         bar.show(); settings.show();
-        const QString previewDirectory = qEnvironmentVariable("UMBRELLA_SMOKE_DIR");
-        if (!previewDirectory.isEmpty()) {
-            QDir().mkpath(previewDirectory);
-            for (int page = 0; page < 4; ++page) {
-                QTimer::singleShot(300 + page * 400, &app, [&, page] {
-                    settings.rootObject()->setProperty("page", page);
-                });
-                QTimer::singleShot(550 + page * 400, &app, [&, page, previewDirectory] {
-                    settings.grabWindow().save(previewDirectory + "/settings-" + QString::number(page) + ".png");
-                    if (page == 0) bar.grabWindow().save(previewDirectory + "/bar.png");
-                });
-            }
-        }
-        QTimer::singleShot(2000, &app, [&] {
+        const auto finish = [&] {
             const auto memory = umbrella::platform::workingSetBytes();
             QTextStream(stdout) << "UI smoke: frames=" << frames << " workingSetBytes=" << memory
                 << " backend=" << static_cast<int>(bar.rendererInterface()->graphicsApi()) << '\n';
             app.exit(!graphicsError && !qmlWarning && memory > 0 && frames >= 2 &&
                 bar.rendererInterface()->graphicsApi() == QSGRendererInterface::Direct3D11 ? 0 : 1);
-        });
+        };
+        const QString previewDirectory = qEnvironmentVariable("UMBRELLA_SMOKE_DIR");
+        std::function<void(int)> previewPage;
+        if (!previewDirectory.isEmpty()) {
+            if (!QDir().mkpath(previewDirectory)) return 1;
+            previewPage = [&, previewDirectory](int page) {
+                settings.rootObject()->setProperty("page", page);
+                QTimer::singleShot(250, &app, [&, page, previewDirectory] {
+                    const bool saved = settings.grabWindow().save(previewDirectory + "/settings-" + QString::number(page) + ".png");
+                    const bool barSaved = page != 0 || bar.grabWindow().save(previewDirectory + "/bar.png");
+                    if (!saved || !barSaved) { app.exit(1); return; }
+                    if (page < 3) previewPage(page + 1); else finish();
+                });
+            };
+            QTimer::singleShot(300, &app, [&] { previewPage(0); });
+            QTimer::singleShot(15000, &app, [&] { app.exit(1); });
+        } else QTimer::singleShot(2000, &app, finish);
         return app.exec();
     }
     if (!shell.start()) return 1;
