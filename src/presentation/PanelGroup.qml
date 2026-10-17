@@ -42,23 +42,26 @@ Grid {
             delegate: Button {
                 id: dot
                 required property int index
-                readonly property var modelData: spaces.items[index] || { index: index, active: false, occupied: false }
+                objectName: "workspaceDot" + index
+                readonly property var workspace: spaces.items[index] || { active: false, occupied: false }
                 enabled: spaces.items.length === shell.workspaceCount
+                checkable: true
+                checked: workspace.active
                 width: 30; height: 26
-                Accessible.name: qsTr("Пространство ") + (modelData.index + 1) + (modelData.active ? qsTr(", активно") : "")
+                Accessible.name: qsTr("Пространство ") + (index + 1) + (workspace.active ? qsTr(", активно") : "")
                 background: Rectangle { color: "transparent" }
                 contentItem: Item {
                     Rectangle {
                         anchors.centerIn: parent
-                        width: dot.modelData.active ? 28 : 12; height: 12; radius: 6
-                        color: dot.modelData.active ? group.theme.accent : (dot.modelData.occupied ? "#aa8791" : "#d4ccd1")
+                        width: dot.workspace.active ? 28 : 12; height: 12; radius: 6
+                        color: dot.workspace.active ? group.theme.accent : (dot.workspace.occupied ? "#aa8791" : "#d4ccd1")
                         scale: dot.hovered ? 1.17 : 1
                         Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         Behavior on color { ColorAnimation { duration: 170 } }
                         Behavior on scale { NumberAnimation { duration: 130 } }
                     }
                 }
-                onClicked: shell.selectWorkspace(panelId, modelData.index)
+                onClicked: shell.selectWorkspace(panelId, index)
             }
         }
     }

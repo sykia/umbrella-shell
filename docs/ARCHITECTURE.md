@@ -72,6 +72,14 @@ MonitorWorkspaces реализует от 1 до 10 групп обычных о
 к окнам удаляемых групп. Кнопки QML имеют постоянную геометрию и живут до изменения
 количества: обновление состояния не пересоздаёт делегаты и не обрывает анимации.
 Это собственное управление видимостью, а не IVirtualDesktopManager Windows.
+Для frameless приложений допускается WS_EX_APPWINDOW без WS_CAPTION; owned,
+tool и no-activate окна исключены. Select сначала публикует recovery intent,
+затем применяет SWP_SHOWWINDOW/HIDEWINDOW одним DeferWindowPos-пакетом с
+NOMOVE/NOSIZE/NOACTIVATE/NOZORDER/NOOWNERZORDER. Видимость проверяется до смены
+активного индекса; ошибка пакета или публикации вызывает возврат окон.
+Это не compositor и не анимация всего экрана; синхронные Win32 callbacks могут
+задержать GUI. Проверки QML отдельно проверяют маршрутизацию индексов и сохранение
+делегатов, а fixture Windows — видимость и placement синтетических окон.
 Scoped discovery исключает окна GUI/guard, owned/tool/elevated/cloaked окна;
 в тесте discovery дополнительно ограничен PID синтетического child process.
 Обновление 500 мс работает только при включённом модуле. Состояние групп не

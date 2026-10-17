@@ -31,8 +31,13 @@ bool same(const Identity& stored) {
     return identity(reinterpret_cast<HWND>(stored.hwnd), now) && now.pid == stored.pid && CompareFileTime(&now.created, &stored.created) == 0;
 }
 bool eligible(HWND hwnd, bool scopedFixture) {
-    if (!IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER) || (GetWindowLongPtrW(hwnd, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) ||
-        !(GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_CAPTION)) return false;
+    const auto style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    const auto extended = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    // Taskbar application windows can draw their own title bar.
+    // Keep owned dialogs outside independent groups: hiding their owner can
+    // implicitly hide them, including when they are on another monitor.
+    if (!IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER) || (style & WS_CHILD) ||
+        (extended & (WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE)) || (!(style & WS_CAPTION) && !(extended & WS_EX_APPWINDOW))) return false;
     DWORD pid = 0; GetWindowThreadProcessId(hwnd, &pid);
     if (pid == GetCurrentProcessId()) return false;
     DWORD cloaked = 0;
@@ -192,13 +197,33 @@ bool MonitorWorkspaces::select(quintptr panel, int index) {
     }
     // Publish intent before hiding: the guardian can recover after any following instruction.
     if (!impl_->publish()) { for (auto& window : impl_->windows) window.hidden = false; stop(); return false; }
+    // Commit visibility together. Do not move/resize/activate windows or change
+    // their stacking order; minimized and maximized placement stays intact.
+    std::vector<Impl::Window*> changes;
+    for (auto& window : impl_->windows)
+        if (window.monitor == monitor && window.hidden && same(window.id)) changes.push_back(&window);
     bool ok = true;
-    for (auto& window : impl_->windows) if (window.monitor == monitor) {
-        if (window.space == static_cast<unsigned>(index) && window.hidden) {
-            if (show(window.id)) window.hidden = false; else ok = false;
-        } else if (window.hidden) { ShowWindow(reinterpret_cast<HWND>(window.id.hwnd), SW_HIDE); if (IsWindowVisible(reinterpret_cast<HWND>(window.id.hwnd))) ok = false; }
+    if (!changes.empty()) {
+        auto batch = BeginDeferWindowPos(static_cast<int>(changes.size()));
+        ok = batch != nullptr;
+        for (const auto* window : changes) {
+            if (!ok) break;
+            const UINT visibility = window->space == static_cast<unsigned>(index) ? SWP_SHOWWINDOW : SWP_HIDEWINDOW;
+            batch = DeferWindowPos(batch, reinterpret_cast<HWND>(window->id.hwnd), nullptr, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | visibility);
+            ok = batch != nullptr;
+        }
+        // DeferWindowPos frees the batch on failure: never end an invalid batch.
+        if (ok) ok = EndDeferWindowPos(batch) != FALSE;
+        if (ok) for (auto* window : changes) {
+            if (!same(window->id)) continue; // Closed during the operation.
+            const bool visible = IsWindowVisible(reinterpret_cast<HWND>(window->id.hwnd)) != FALSE;
+            if (visible != (window->space == static_cast<unsigned>(index))) ok = false;
+            else if (visible) window->hidden = false;
+        }
     }
     if (!ok) { stop(); emit failed(tr("Не удалось безопасно переключить группу окон. Проверьте восстановление окон.")); return false; }
-    active->second = static_cast<unsigned>(index); impl_->publish(); refresh(); emit changed(); return true;
+    if (!impl_->publish()) { stop(); return false; }
+    active->second = static_cast<unsigned>(index); refresh(); emit changed(); return true;
 }
 }
