@@ -10,8 +10,9 @@ Grid {
     component PanelButton: Button {
         width: 40; height: 38
         font.pixelSize: 14; font.bold: true
+        icon.width: 18; icon.height: 18; icon.color: "#f7edf0"
         palette.buttonText: "#ececf5"
-        background: Rectangle { radius: 11; color: parent.hovered ? "#4c3c67" : "#30313e" }
+        background: Rectangle { radius: 11; color: parent.hovered ? "#67313b" : "#30313e" }
         ToolTip.visible: hovered
     }
     PanelButton {
@@ -24,9 +25,9 @@ Grid {
     Grid {
         visible: shell.moduleZones.workspaces === group.zone
         columns: group.vertical ? 1 : 3; spacing: 3
-        PanelButton { text: "‹"; Accessible.name: qsTr("Предыдущий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(-1) }
-        PanelButton { text: "\uE7F4"; font.family: "Segoe MDL2 Assets"; Accessible.name: qsTr("Все рабочие столы"); ToolTip.text: Accessible.name; onClicked: shell.showDesktops() }
-        PanelButton { text: "›"; Accessible.name: qsTr("Следующий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(1) }
+        PanelButton { icon.source: "qrc:/assets/icons/previous-light.svg"; Accessible.name: qsTr("Предыдущий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(-1) }
+        PanelButton { icon.source: "qrc:/assets/icons/desktop-light.svg"; Accessible.name: qsTr("Все рабочие столы"); ToolTip.text: Accessible.name; onClicked: shell.showDesktops() }
+        PanelButton { icon.source: "qrc:/assets/icons/next-light.svg"; Accessible.name: qsTr("Следующий рабочий стол"); ToolTip.text: Accessible.name; onClicked: shell.moveDesktop(1) }
     }
     PanelButton {
         visible: shell.moduleZones.keyboard === group.zone
@@ -37,7 +38,7 @@ Grid {
     }
     PanelButton {
         visible: shell.moduleZones.volume === group.zone
-        text: "\uE767"; font.family: "Segoe MDL2 Assets"; Accessible.name: qsTr("Параметры громкости Windows"); ToolTip.text: Accessible.name
+        icon.source: "qrc:/assets/icons/volume-light.svg"; Accessible.name: qsTr("Параметры громкости Windows"); ToolTip.text: Accessible.name
         onClicked: shell.openSound()
     }
 }

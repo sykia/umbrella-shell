@@ -11,9 +11,9 @@ Rectangle {
     NumberAnimation { id: pageFade; target: content; property: "opacity"; from: 0.35; to: 1; duration: 220; easing.type: Easing.OutCubic }
     readonly property color ink: "#4c4145"
     readonly property var modules: [
-        { key: "workspaces", title: qsTr("Рабочие пространства"), icon: "◐" },
-        { key: "keyboard", title: qsTr("Клавиатура"), icon: "⌨" },
-        { key: "volume", title: qsTr("Громкость"), icon: "♪" }
+        { key: "workspaces", title: qsTr("Рабочие пространства"), icon: "desktop" },
+        { key: "keyboard", title: qsTr("Клавиатура"), icon: "keyboard" },
+        { key: "volume", title: qsTr("Громкость"), icon: "volume" }
     ]
     component TextLabel: Label { color: root.ink; font.family: "Segoe UI"; font.pixelSize: 12 }
     component Action: Button {
@@ -35,10 +35,10 @@ Rectangle {
             }
             Repeater {
                 model: [
-                    { title: qsTr("Добро пожаловать"), icon: "⌂", page: 0 },
-                    { title: qsTr("Общие"), icon: "⚙", page: 1 },
-                    { title: qsTr("Панель"), icon: "▣", page: 2 },
-                    { title: qsTr("О программе"), icon: "ⓘ", page: 3 }
+                    { title: qsTr("Добро пожаловать"), icon: "home", page: 0 },
+                    { title: qsTr("Общие"), icon: "general", page: 1 },
+                    { title: qsTr("Панель"), icon: "panel", page: 2 },
+                    { title: qsTr("О программе"), icon: "info", page: 3 }
                 ]
                 delegate: Column {
                     required property var modelData
@@ -57,7 +57,7 @@ Rectangle {
                                 width: 25; height: 25; radius: 13; anchors.verticalCenter: parent.verticalCenter
                                 color: root.page === modelData.page ? "#ec6978" : "#dfd3d7"
                                 Behavior on color { ColorAnimation { duration: 180 } }
-                                TextLabel { anchors.centerIn: parent; text: modelData.icon; color: root.page === modelData.page ? "white" : "#97858c"; font.pixelSize: 16 }
+                                Image { anchors.centerIn: parent; width: 16; height: 16; source: "qrc:/assets/icons/" + modelData.icon + (root.page === modelData.page ? "-light" : "") + ".svg"; sourceSize: Qt.size(24, 24) }
                             }
                             TextLabel { text: modelData.title; anchors.verticalCenter: parent.verticalCenter; color: root.page === modelData.page ? "white" : root.ink; font.pixelSize: 11; font.bold: root.page === modelData.page }
                         }
@@ -143,7 +143,9 @@ Rectangle {
                                         delegate: Action {
                                             required property var modelData
                                             visible: shell.moduleZones[modelData.key] === zone
-                                            text: modelData.icon + "  " + modelData.title
+                                            text: modelData.title
+                                            icon.source: "qrc:/assets/icons/" + modelData.icon + ".svg"
+                                            icon.color: root.ink; icon.width: 14; icon.height: 14
                                             height: 27; width: implicitWidth + 12
                                             onClicked: shell.setModuleZone(modelData.key, zone === 2 ? -1 : zone + 1)
                                             MouseArea { anchors.fill: parent; acceptedButtons: Qt.RightButton; onClicked: shell.setModuleZone(modelData.key, -1) }
