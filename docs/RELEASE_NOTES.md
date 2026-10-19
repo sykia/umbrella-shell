@@ -36,7 +36,8 @@ Umbrella через «Пуск» или ПКМ панели → Umbrella. Пом
 подписей; новая версия устанавливается вручную из GitHub Releases. Собственная
 Shell Bar, рабочие столы, темы/обои и учёт активности отсутствуют.
 
-Полная C++/Qt-сборка и восемь CTest, deployment smoke и Inno-компиляция проверяются
-CI. Актуальный отчёт: [VERIFICATION.md](https://github.com/sykia/umbrella-shell/blob/v0.1.0/docs/VERIFICATION.md).
+Полная C++/Qt-сборка, все восемь CTest, deployment smoke и Inno-компиляция прошли
+[релизный CI](https://github.com/sykia/umbrella-shell/actions/runs/39248989460).
+Актуальный отчёт: [VERIFICATION.md](https://github.com/sykia/umbrella-shell/blob/main/docs/VERIFICATION.md).
 Уведомления Qt и ссылки на соответствующие исходники включены в пакет.
 Лицензия собственного кода пока не выбрана владельцем.

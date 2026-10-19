@@ -46,7 +46,8 @@
 
 ## Получение сборки
 
-[Релизы](https://github.com/sykia/umbrella-shell/releases) ·
+[Скачать установщик Windows x64](https://github.com/sykia/umbrella-shell/releases/download/v0.1.0/UmbrellaShell-0.1.0-windows-x64-setup.exe) ·
+[Релиз 0.1.0 и SHA-256](https://github.com/sykia/umbrella-shell/releases/tag/v0.1.0) ·
 [Проверки CI](https://github.com/sykia/umbrella-shell/actions)
 
 Первый релиз — предварительный Windows x64 installer без цифровой подписи.
