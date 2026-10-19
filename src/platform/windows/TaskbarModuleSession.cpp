@@ -57,6 +57,22 @@ bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness
     }
     return true;
 }
+bool TaskbarModuleSession::positionTaskView(int x, QString& error, bool afterWidgets) {
+    if (x < 0 || x > (afterWidgets ? 96 : 16384) || !layoutAvailable()) { error = QStringLiteral("Task View: сборка DLL или позиция не поддерживается."); return false; }
+    if (host_.state() == QProcess::NotRunning) {
+        host_.setProgram(hostPath()); host_.setArguments({"--configure-taskview"});
+        host_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) { args->flags |= CREATE_NO_WINDOW; });
+        host_.start();
+        if (!host_.waitForStarted(3000) || !waitForLine("layout-ready")) {
+            QString ignored; stop(ignored); error = QStringLiteral("Task View: нужна исходная нижняя панель, 100%, 48 DIP, DPI 100%, без автоскрытия и другой native-сессии."); return false;
+        }
+    }
+    const auto command = QByteArray(afterWidgets ? "after-widgets " : "position ") + QByteArray::number(x) + '\n';
+    if (host_.write(command) != command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("taskview-ok")) {
+        QString ignored; stop(ignored); error = QStringLiteral("Task View: Explorer отказал (занятое место или несовместимое состояние). Запрошен откат."); return false;
+    }
+    return true;
+}
 bool TaskbarModuleSession::stop(QString& error) {
     if (host_.state() == QProcess::NotRunning) return true;
     host_.closeWriteChannel(); // EOF restores the subclass and original rectangle, then exits.

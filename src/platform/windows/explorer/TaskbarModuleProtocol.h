@@ -26,4 +26,32 @@ struct IslandMask {
     RECT rectangles[maxIslands]{}; // Window-relative physical pixels.
 };
 static_assert(sizeof(Configuration) == 32);
+
+// Opt-in developer experiment; never included in the persistent configuration.
+inline constexpr ULONG_PTR editProtocol = protocol + 2;
+inline constexpr ULONG_PTR editReportProtocol = protocol + 3;
+enum class EditAction : std::uint32_t { Inspect, Begin, Preview, Reset, Status, Place, AfterWidgets };
+struct EditRequest {
+    std::uint32_t size = sizeof(EditRequest);
+    std::uint32_t version = 1;
+    EditAction action = EditAction::Inspect;
+    double position = 0; // Absolute X within the existing parent, DIP; Place only.
+};
+struct EditAncestor {
+    wchar_t type[128]{};
+    wchar_t name[80]{};
+    double width{}, height{};
+};
+struct EditReport {
+    std::uint32_t size = sizeof(EditReport);
+    std::uint32_t version = 1;
+    HRESULT status = E_FAIL;
+    std::uint32_t editing{}, dragging{}, moves{}, clicks{}, focusEvents{};
+    std::uint32_t hitTestVisible{}, rootBackground{};
+    double offset{}, buttonX{}, buttonY{}, buttonWidth{}, parentWidth{};
+    wchar_t blockerType[128]{};
+    double blockerX{}, blockerWidth{};
+    std::uint32_t ancestors{};
+    EditAncestor chain[8]{}; // Interactive button first, then immediate visual parents.
+};
 }

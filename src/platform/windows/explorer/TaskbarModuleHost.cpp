@@ -2,10 +2,14 @@
 #include "NativeTaskbarLayout.h"
 #include "TaskbarIslands.h"
 #include "TaskbarPopupPlacement.h"
+#include "TaskbarButtonEditVerification.h"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <shellapi.h>
 #include <vector>
+#include <mutex>
 
 namespace {
 using namespace umbrella::explorer;
@@ -20,6 +24,12 @@ bool maskPending = false, extendedAck = false, pendingDetached = false;
 constexpr UINT configureMessage = WM_APP + 19;
 HWINEVENTHOOK popupHook{};
 bool layoutActive = false;
+bool editExperiment = false, reportReceived = false;
+bool verifyOwnerDeath = false;
+bool configureTaskview = false, verifyPlacement = false;
+EditReport editReport;
+std::mutex editReportMutex;
+constexpr UINT editMessage = WM_APP + 20;
 unsigned currentEdge = 3;
 void CALLBACK popupChanged(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD);
 bool isExplorer(HWND window) {
@@ -67,6 +77,7 @@ bool attach(HWND target) {
         && configure(target, 100, false);
 }
 void restore() {
+    if (editExperiment && attachments.size() == 1 && !SendMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0)) failed = true;
     layoutActive = false;
     if (popupHook) UnhookWinEvent(popupHook); popupHook = nullptr;
     islands::stop();
@@ -81,6 +92,39 @@ void restore() {
     attachments.clear();
 }
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_COPYDATA && editExperiment && attachments.size() == 1 &&
+        reinterpret_cast<HWND>(wp) == attachments.front().window) {
+        const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
+        if (!packet || packet->dwData != editReportProtocol || packet->cbData != sizeof(EditReport) || !packet->lpData) return FALSE;
+        const auto& report = *static_cast<const EditReport*>(packet->lpData);
+        if (report.size != sizeof(report) || report.version != 1 || report.ancestors > 8) return FALSE;
+        { const std::lock_guard lock(editReportMutex); editReport = report; }
+        reportReceived = true;
+        return TRUE;
+    }
+    if (message == editMessage && editExperiment && attachments.size() == 1) {
+        EditRequest request; request.action = static_cast<EditAction>(wp); request.position = static_cast<double>(lp);
+        COPYDATASTRUCT packet{editProtocol, sizeof(request), &request};
+        DWORD_PTR accepted{}; reportReceived = false;
+        // Permit only the bounded reentrant report handler above during this call.
+        const bool ok = SendMessageTimeoutW(attachments.front().window, WM_COPYDATA,
+            reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&packet), SMTO_ABORTIFHUNG, 3000, &accepted) && accepted && reportReceived;
+        if (reportReceived) {
+            std::printf("taskview status=%08lx edit=%u drag=%u moves=%u clicks=%u focus=%u offset=%.1f button=(%.1f,%.1f,%.1f) parentWidth=%.1f\n",
+                static_cast<unsigned long>(editReport.status), editReport.editing, editReport.dragging, editReport.moves,
+                editReport.clicks, editReport.focusEvents, editReport.offset, editReport.buttonX, editReport.buttonY,
+                editReport.buttonWidth, editReport.parentWidth);
+            if (editReport.blockerType[0]) std::printf("  blocker=%ls x=%.1f width=%.1f\n", editReport.blockerType, editReport.blockerX, editReport.blockerWidth);
+            std::printf("  input hit=%u rootBackground=%u\n", editReport.hitTestVisible, editReport.rootBackground);
+            if (request.action == EditAction::Inspect || request.action == EditAction::Begin)
+                for (unsigned i = 0; i < editReport.ancestors; ++i)
+                    std::printf("  parent[%u] %ls name=%ls size=%.1fx%.1f\n", i, editReport.chain[i].type,
+                        editReport.chain[i].name, editReport.chain[i].width, editReport.chain[i].height);
+        }
+        std::puts(ok ? "taskview-ok" : "taskview-refused"); std::fflush(stdout);
+        if (!ok) failed = true;
+        return ok;
+    }
     if (message == RegisterWindowMessageW(L"Umbrella.Taskbar.MenuOpened.1")) {
         std::fprintf(stderr, "Taskbar menu status: %08lx\n", static_cast<unsigned long>(lp));
         std::fflush(stderr);
@@ -135,6 +179,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         return 0;
     }
     if (message == WM_TIMER || message == WM_CLOSE) {
+        if (editExperiment && message == WM_CLOSE && wp == 1) failed = true;
         KillTimer(window, 1);
         restore();
         DestroyWindow(window);
@@ -175,15 +220,24 @@ int wmain(int argc, wchar_t** argv) {
     }
     const bool fixture = argc == 2 && !wcscmp(argv[1], L"--fixture");
     const bool serve = argc == 2 && !wcscmp(argv[1], L"--serve");
-    if (serve && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
+    const bool inspect = argc == 2 && !wcscmp(argv[1], L"--inspect-taskview");
+    configureTaskview = argc == 2 && !wcscmp(argv[1], L"--configure-taskview");
+    verifyOwnerDeath = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-owner-death");
+    verifyPlacement = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-placement");
+    const bool verify = verifyPlacement || verifyOwnerDeath || (argc == 2 && !wcscmp(argv[1], L"--verify-taskview"));
+    editExperiment = configureTaskview || inspect || verify || (argc == 4 && !wcscmp(argv[1], L"--edit-taskview") && !wcscmp(argv[2], L"--seconds"));
+    if ((serve || editExperiment) && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
         std::puts("FAILED; another Umbrella taskbar session is active"); return 5;
     }
-    if (!fixture && !serve && (argc != 5 || wcscmp(argv[1], L"--width") || wcscmp(argv[3], L"--seconds"))) {
-        std::puts("Usage: UmbrellaTaskbarHost --fixture | --serve | --width 40..100 --seconds 1..120");
+    if (editExperiment && !native_layout::installedBuildSupported()) {
+        std::puts("FAILED; taskview experiment requires the exact supported taskbar DLLs"); return 5;
+    }
+    if (!fixture && !serve && !editExperiment && (argc != 5 || wcscmp(argv[1], L"--width") || wcscmp(argv[3], L"--seconds"))) {
+        std::puts("Usage: UmbrellaTaskbarHost --fixture | --serve | --width 40..100 --seconds 1..120 | --inspect-taskview | --edit-taskview --seconds 1..120 | --verify-taskview | --verify-taskview-owner-death");
         return 2;
     }
-    unsigned width = fixture ? 75 : serve ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
-    unsigned seconds = fixture || serve ? 1 : static_cast<unsigned>(_wtoi(argv[4]));
+    unsigned width = fixture ? 75 : serve || editExperiment ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
+    unsigned seconds = verify ? 120 : fixture || serve || inspect || configureTaskview ? 1 : editExperiment ? static_cast<unsigned>(_wtoi(argv[3])) : static_cast<unsigned>(_wtoi(argv[4]));
     if (width < 40 || width > 100 || seconds < 1 || seconds > 120) return 2;
     std::array<wchar_t, 32768> path{};
     GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
@@ -208,9 +262,33 @@ int wmain(int argc, wchar_t** argv) {
         test = CreateWindowW(testType.lpszClassName, L"Umbrella module geometry test", WS_POPUP,
                              0, 0, GetSystemMetrics(SM_CXSCREEN), 48, nullptr, nullptr, testType.hInstance, nullptr);
         failed = !test || !attach(test);
+    } else if (editExperiment) {
+        const HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
+        RECT rect{}; MONITORINFO monitor{sizeof(monitor)};
+        APPBARDATA bar{}; bar.cbSize = sizeof(bar); bar.hWnd = primary;
+        HRGN region = CreateRectRgn(0, 0, 0, 0);
+        const int regionKind = region ? GetWindowRgn(primary, region) : -1;
+        const bool gotRect = GetWindowRect(primary, &rect) != 0;
+        const bool gotMonitor = GetMonitorInfoW(MonitorFromWindow(primary, MONITOR_DEFAULTTONULL), &monitor) != 0;
+        // Umbrella's ordinary restore can leave an explicit full rectangular region.
+        HRGN full = gotRect ? CreateRectRgn(0, 0, rect.right - rect.left, rect.bottom - rect.top) : nullptr;
+        const bool unclipped = region && (regionKind == ERROR || (full && EqualRgn(region, full)));
+        if (full) DeleteObject(full);
+        if (region) DeleteObject(region);
+        const bool standard = primary && isExplorer(primary) && unclipped && GetDpiForWindow(primary) == 96 &&
+            gotRect && gotMonitor &&
+            (monitor.dwFlags & MONITORINFOF_PRIMARY) && rect.left == monitor.rcMonitor.left && rect.right == monitor.rcMonitor.right &&
+            rect.bottom == monitor.rcMonitor.bottom && rect.bottom - rect.top == 48 && !(SHAppBarMessage(ABM_GETSTATE, &bar) & ABS_AUTOHIDE);
+        if (!standard) {
+            std::printf("FAILED; baseline: dpi=%u rect=(%ld,%ld,%ld,%ld) monitor=(%ld,%ld,%ld,%ld) unclipped=%u autohide=%u\n",
+                GetDpiForWindow(primary), rect.left, rect.top, rect.right, rect.bottom,
+                monitor.rcMonitor.left, monitor.rcMonitor.top, monitor.rcMonitor.right, monitor.rcMonitor.bottom,
+                unclipped ? 1u : 0u, (SHAppBarMessage(ABM_GETSTATE, &bar) & ABS_AUTOHIDE) ? 1u : 0u);
+            failed = true;
+        } else if (!attach(primary)) { std::puts("FAILED; primary taskbar attach handshake refused"); failed = true; }
     } else EnumWindows(collect, 0);
     if (attachments.empty()) failed = true;
-    if (!serve) for (const auto& value : attachments) {
+    if (!serve && !editExperiment) for (const auto& value : attachments) {
         if (!configure(value.window, width, true)) { failed = true; break; }
         RECT now{};
         GetWindowRect(value.window, &now);
@@ -266,7 +344,63 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
     std::fflush(stdout);
-    if (serve && !failed) {
+    if (editExperiment && !failed) {
+        const bool ok = SendMessageW(owner, editMessage, static_cast<WPARAM>(inspect || configureTaskview || verifyPlacement ? EditAction::Inspect : EditAction::Begin), 0) != 0;
+        if (inspect || !ok) {
+            restore(); DestroyWindow(owner);
+        } else if (configureTaskview) {
+            std::puts("layout-ready"); std::fflush(stdout);
+            inputThread = CreateThread(nullptr, 0, [](void*) -> DWORD {
+                char line[64]{};
+                while (std::fgets(line, sizeof(line), stdin)) {
+                    unsigned x{}; char extra{};
+                    if (sscanf_s(line, "position %u %c", &x, &extra, 1u) == 1 && x <= 16384)
+                        PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Place), x);
+                    else if (sscanf_s(line, "after-widgets %u %c", &x, &extra, 1u) == 1 && x <= 96)
+                        PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::AfterWidgets), x);
+                    else if (!std::strcmp(line, "status\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Status), 0);
+                    else if (!std::strcmp(line, "reset\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0);
+                    else break;
+                }
+                PostMessageW(owner, WM_CLOSE, 0, 0); return 0;
+            }, nullptr, 0, nullptr);
+            if (!inputThread) { failed = true; PostMessageW(owner, WM_CLOSE, 1, 0); }
+        } else if (verify) {
+            inputThread = CreateThread(nullptr, 0, [](void*) -> DWORD {
+                const bool ok = button_edit_verification::run(attachments.front().window, [](EditAction action, EditReport& report) {
+                    const bool accepted = SendMessageW(owner, editMessage, static_cast<WPARAM>(action), 0) != 0;
+                    { const std::lock_guard lock(editReportMutex); report = editReport; }
+                    return accepted;
+                }, verifyOwnerDeath, verifyPlacement ? std::function<bool(int)>([](int x) {
+                    return SendMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Place), x) != 0;
+                }) : std::function<bool(int)>{});
+                if (ok && verifyOwnerDeath) {
+                    std::puts("verify: ready-for-owner-death; timeout still armed"); std::fflush(stdout);
+                    return 0;
+                }
+                PostMessageW(owner, WM_CLOSE, ok ? 0 : 1, 0);
+                return 0;
+            }, nullptr, 0, nullptr);
+            if (!inputThread || !SetTimer(owner, 1, seconds * 1000, nullptr)) { failed = true; PostMessageW(owner, WM_CLOSE, 0, 0); }
+        } else {
+            std::puts("Left-drag the original Task View button in edit mode. Use preview to restore native clicks. Commands: status, preview, edit, reset, quit. Automatic rollback at timeout/EOF/host death.");
+            std::fflush(stdout);
+            inputThread = CreateThread(nullptr, 0, [](void*) -> DWORD {
+                char line[32]{};
+                while (std::fgets(line, sizeof(line), stdin)) {
+                    EditAction action{};
+                    if (!std::strcmp(line, "status\n")) action = EditAction::Status;
+                    else if (!std::strcmp(line, "preview\n")) action = EditAction::Preview;
+                    else if (!std::strcmp(line, "edit\n")) action = EditAction::Begin;
+                    else if (!std::strcmp(line, "reset\n")) action = EditAction::Reset;
+                    else { PostMessageW(owner, WM_CLOSE, 0, 0); return 0; }
+                    PostMessageW(owner, editMessage, static_cast<WPARAM>(action), 0);
+                }
+                PostMessageW(owner, WM_CLOSE, 0, 0); return 0;
+            }, nullptr, 0, nullptr);
+            if (!inputThread || !SetTimer(owner, 1, seconds * 1000, nullptr)) { failed = true; PostMessageW(owner, WM_CLOSE, 0, 0); }
+        }
+    } else if (serve && !failed) {
         std::vector<HWND> windows;
         for (const auto& value : attachments) windows.push_back(value.window);
         if (!islands::start(owner, windows)) { restore(); return 5; }
@@ -300,6 +434,6 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(inputThread);
     }
     FreeLibrary(module);
-    std::puts(failed ? "FAILED; restore requested" : "Passed; original geometry restored");
+    std::puts(failed ? "FAILED; restore requested" : editExperiment ? "Passed; taskview reset acknowledged; native session ended" : "Passed; original geometry restored");
     return failed ? 1 : 0;
 }

@@ -11,6 +11,7 @@ public:
     bool start(QString& error);
     bool apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error);
     bool stop(QString& error);
+    bool positionTaskView(int x, QString& error, bool afterWidgets = false);
 private:
     bool waitForLine(const QByteArray& expected);
     QProcess host_;

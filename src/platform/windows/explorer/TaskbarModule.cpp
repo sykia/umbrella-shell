@@ -4,6 +4,7 @@
 #include "TaskbarVisualLayout.h"
 #include "TaskbarSmoothClip.h"
 #include "TaskbarPopupPlacement.h"
+#include "TaskbarButtonEdit.h"
 #include <shellapi.h>
 #include <CommCtrl.h>
 #include <array>
@@ -19,6 +20,7 @@ struct State {
     std::array<HWND, 16> popups{};
     visual_layout::Session visuals;
     smooth_clip::Session smooth;
+    button_edit::Session buttonEdit;
     bool detached = false;
     SIZE clipSize{};
     UINT clipDpi{};
@@ -209,6 +211,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         state->visuals.suspend(); return TRUE;
     }
     if (message == RegisterWindowMessageW(restoreMessage) || message == WM_NCDESTROY) {
+        state->buttonEdit.reset(); // Includes owner-death recovery before DLL teardown.
         state->restoring = true;
         detachPopups(state);
         suspendAllVisuals(state->owner);
@@ -240,6 +243,25 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
     }
     if (message == WM_COPYDATA && reinterpret_cast<HWND>(wparam) == state->owner) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+        if (packet && packet->dwData == editProtocol && packet->cbData == sizeof(EditRequest) && packet->lpData) {
+            const auto request = *static_cast<const EditRequest*>(packet->lpData);
+            if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::AfterWidgets) return FALSE;
+            HRESULT status = S_OK;
+            if (request.action == EditAction::Begin) {
+                // Experiment never combines with resizing, islands or native edge changes.
+                status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.begin(hwnd);
+            } else if (request.action == EditAction::Place) {
+                status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.position(hwnd, request.position);
+            } else if (request.action == EditAction::AfterWidgets) {
+                status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.afterWidgets(hwnd, request.position);
+            } else if (request.action == EditAction::Preview && !state->buttonEdit.preview()) status = E_FAIL;
+            else if (request.action == EditAction::Reset && !state->buttonEdit.reset()) status = E_FAIL;
+            auto report = state->buttonEdit.report(hwnd, status);
+            COPYDATASTRUCT reply{editReportProtocol, sizeof(report), &report};
+            DWORD_PTR received{};
+            return SendMessageTimeoutW(state->owner, WM_COPYDATA, reinterpret_cast<WPARAM>(hwnd),
+                reinterpret_cast<LPARAM>(&reply), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &received) && received && SUCCEEDED(report.status);
+        }
         if (packet && packet->dwData == islandsProtocol && packet->cbData == sizeof(IslandMask) && packet->lpData) {
             if (!state->islands) return FALSE;
             const auto& mask = *static_cast<const IslandMask*>(packet->lpData);

@@ -109,6 +109,7 @@ Item {
     }
 
     ScrollView {
+        id: pageScroll
         anchors.fill: parent
         clip: true
         contentWidth: availableWidth
@@ -123,6 +124,8 @@ Item {
                 opacity: 0.65; font.pixelSize: 11
                 Layout.topMargin: -8
             }
+
+            TaskbarConfiguration { Layout.fillWidth: true; system: page.system; scrollTarget: pageScroll.contentItem }
 
             Rectangle {
                 id: desktop

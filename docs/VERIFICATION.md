@@ -58,6 +58,20 @@ Native `--fixture` и menu fixture не требуют изменения нас
 Точные границы: [TASKBAR_NATIVE_LAYOUT.md](TASKBAR_NATIVE_LAYOUT.md) и
 [TASKBAR_CONTEXT_MENU.md](TASKBAR_CONTEXT_MENU.md).
 
+## Локальный прототип перемещения Task View
+
+Отдельный opt-in прототип Task View проверен локально: физический левый drag
+через SendInput сдвинул тот же UIA-элемент с x=1239 в x=250, y=1392, 44×48 px.
+UIA hit-test подтвердил новую область и отсутствие кнопки на старом месте.
+Левый клик вызвал исходный Click и открыл XamlExplorerHostIslandWindow;
+после Esc UIA SetFocus вернул S_OK и HasKeyboardFocus=true. Reset вернул
+исходный RECT. Отдельно принудительно завершён только свежий тестовый host
+с оставленной сдвинутой кнопкой и edit-вводом: через 1,5 с читающий inspect
+подтвердил x=1239, нулевое смещение, IsHitTestVisible=true и прежний Background.
+Explorer не перезапускался. Host/DLL собраны точечно
+MSVC 14.42; полной CMake/Qt/installer/VM-проверки прототипа нет.
+Подробности и воспроизведение: [TASKBAR_BUTTON_EDIT_PROTOTYPE.md](TASKBAR_BUTTON_EDIT_PROTOTYPE.md).
+
 ## Не подтверждено
 
 Установка/upgrade/uninstall в чистой Windows 11 VM, подпись релиза, длительная
@@ -65,3 +79,39 @@ Native `--fixture` и menu fixture не требуют изменения нас
 питания и совместный сбой восстановительных процессов. Освобождение GPU при
 скрытии запрашивается через Qt, но экономия памяти/энергии не измерена.
 Автообновления не реализованы и не проверены.
+
+## Локальное исправление подключения после установки (2026-10-19)
+
+Установленный 0.1.0 воспроизвёл отказ handshake TaskbarHost. Локальный A/B
+MSVC 14.42: /MT с /guard:cf отказывает, /MT без /guard:cf подключается;
+остальные проверенные флаги /sdl, /permissive-, WIN32_LEAN_AND_MEAN сохранены.
+Исключение CFG ограничено TaskbarModule; точная внутренняя причина не установлена.
+Ранняя гипотеза о поиске динамической CRT отдельно не подтверждена.
+Исправленная DLL собрана вручную и установлена локально с резервной копией исходной.
+Подтверждены ready, applied для top/left и detached 75%/72 DIP, EOF restore/exit=0,
+--fixture, diagnostics, QML/D3D11 smoke, Foundation и public index audit.
+Старый тестовый MenuHost штатно остановлен; установленный --open-settings вернул 0.
+Полная CMake/CTest сборка, новый installer и VM-проверка этой правки не выполнялись.
+
+## Конструктор внутри настроек — локальная проверка
+
+`tests/taskbar_configuration_ui_test.py` проверил Qt mouse drag: три области,
+вставку/порядок, каталог, отмену, два независимых черновика, неподдерживаемые
+сценарии и автопрокрутку страницы. `taskbar_live_ui_test.py` прошёл без регрессии.
+Точечно собраны GUI и native host/DLL MSVC 14.42, Qt 6.8.3. UI smoke: D3D11,
+blur, кадры; QML warnings отсутствовали. Полная CMake/deployment сборка не запускалась.
+
+Desktop C++ fixture прошёл всю цепочку GUI drag → отдельное применение →
+оригинальная Task View x=224 → UIA point-hit/CompareElements → настоящий клик/
+Task View → Reset. Подтверждено раздельное сохранение/перечитывание для двух
+реальных QScreen и отклонение неверного черновика; INI теста временный.
+Отдельно прошли native position/click/focus/reset и owner-death нового
+--configure-taskview: x=1239 восстановлен через 1,5 s после смерти только host.
+Explorer не перезапускался. Проверка занятых x=176 вернула ERROR_BUSY и откат,
+а не фиктивный успех. Дополнительная панель и остальные компоненты в Windows
+не переставлялись. [Границы и команды](TASKBAR_CONFIGURATION.md).
+
+Закрытие этапа: обычный exe без --ui-smoke/fixture открыт через штатную навигацию
+Taskbar. «Конфигурация панели» видна в верхней части страницы. Повторная ручная
+MSVC/Qt-сборка и локальное развёртывание runtime выполнены; установленная копия
+не заменялась, native-применение не запускалось.

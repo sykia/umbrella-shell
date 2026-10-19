@@ -37,12 +37,40 @@ islands=(true,true). Старое islands=true нормализуется в det
 
 ## Native-модули Explorer
 
+Обе hook DLL связываются со статической MSVC runtime (/MT, /MTd для Debug).
+Это изолирует зависимости от контекста поиска app-local runtime приложения; DLL
+не должны требовать его копии MSVC runtime. Через границу модулей передаются
+Win32-сообщения и фиксированные структуры, без владения объектами CRT.
+Для UmbrellaTaskbarModule исключена /guard:cf: локальный A/B с одной версией
+компилятора и /MT воспроизводит отказ handshake только при CFG-инструментации.
+In-process fixture его не обнаруживает. ASLR/DEP и CFG других targets сохранены.
+Точная внутренняя причина отказа CFG внутри Explorer пока не установлена.
+
 UmbrellaTaskbarHost и UmbrellaTaskbarModule обслуживают геометрию, XAML-оформление,
 островки и placement скрытых значков. WH_CALLWNDPROC ограничен потоками проверенных
 окон панели; subclass работает на их UI-потоке. Боковой native layout требует точного
 совпадения RSDS трёх системных DLL, повторно проверяемого внутри Explorer.
 Временные биты feature cache и TaskbarLocation возвращаются при завершении сессии.
 [Механизм, GUID и ограничения](TASKBAR_NATIVE_LAYOUT.md).
+
+Ручные developer-команды TaskbarHost `--inspect-taskview`/`--edit-taskview`
+используют ту же native-сессию и owner-death worker. Одна исходная Task View
+двигается через XAML UIElement.Translation внутри прежнего ItemsRepeater;
+в edit-режиме захват обслуживает существующий RootGrid с временным отключением
+hit-test только кнопки; preview возвращает его и штатный клик Explorer.
+Новые фиксированные WM_COPYDATA request/report
+не входят в Configuration оформления. GUI/--serve этот drag-режим не включает. Ограничения
+и фактические проверки: [прототип](TASKBAR_BUTTON_EDIT_PROTOTYPE.md).
+
+Конструктор TaskbarConfiguration.qml отделён от нативного применения: TaskbarLayout.js
+хранит version=1 и четыре списка ID, TaskbarSettings сохраняет независимые черновики
+по идентификаторам QScreen в INI без автоприменения. Дополнительный монитор пока
+редактируется только в модели. GUI разрешает единственный проверенный сценарий:
+Task View после Widgets слева на основной панели. Существующий host в отдельном
+opt-in --configure-taskview принимает after-widgets gap, измеряет текущий wrapper
+и меняет Translation без регистрации pointer drag-обработчиков и без hit-test mask.
+Активное оформление не заменяется неявно; при смене оформления component-session
+сначала закрывается с восстановлением. [Модель, проверки и ограничения](TASKBAR_CONFIGURATION.md).
 
 Толщина не изменяет нативные Width/Height фреймов/кнопок: масштабируется только
 TaskbarBackground, SystemTrayFrame центрируется, внутренние stroke скрываются.
