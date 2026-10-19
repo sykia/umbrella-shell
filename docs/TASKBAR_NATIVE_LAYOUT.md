@@ -148,4 +148,3 @@ API: [Visual.BorderMode](https://learn.microsoft.com/uwp/api/windows.ui.composit
 Упоминания локально не собранного GUI выше относятся к этапу native-прототипа.
 Свежие результаты полного C++/Qt и границы проверок приведены в
 [VERIFICATION.md](VERIFICATION.md). Это основной источник статуса сборки.
-

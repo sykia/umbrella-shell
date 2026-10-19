@@ -90,4 +90,3 @@ begin
   if not Result then
     MsgBox('Umbrella taskbar menu could not be stopped. Close its menu and retry uninstalling.', mbError, MB_OK);
 end;
-

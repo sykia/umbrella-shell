@@ -76,4 +76,3 @@ jobs:
           if ($env:UMBRELLA_SIGN_CERT_SHA1) {
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:UMBRELLA_SIGN_CERT_SHA1" -Force -ErrorAction SilentlyContinue
           }
-
