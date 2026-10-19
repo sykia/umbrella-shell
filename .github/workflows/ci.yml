@@ -45,13 +45,8 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: shell-bar-runtime-development
+          name: settings-runtime-development
           path: stage/**
-          if-no-files-found: error
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: workspace-fixture-development
-          path: build/windows-msvc/Release/umbrella_workspace_tests.exe
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

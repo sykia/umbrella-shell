@@ -28,7 +28,10 @@ try {
     if ($Signed) {
         if (!$env:UMBRELLA_SIGN_CERT_SHA1) { throw 'Signing certificate thumbprint is required' }
         $signTool = (Get-Command signtool.exe -ErrorAction Stop).Source
-        Invoke-Checked $signTool @('sign', '/sha1', $env:UMBRELLA_SIGN_CERT_SHA1, '/fd', 'SHA256', '/tr', 'http://timestamp.digicert.com', '/td', 'SHA256', (Join-Path $stage 'UmbrellaShell.exe'))
+        $runtimeFiles = @('UmbrellaShell.exe', 'UmbrellaTaskbarHost.exe', 'UmbrellaTaskbarModule.dll', 'UmbrellaMenuHost.exe', 'UmbrellaMenuModule.dll')
+        foreach ($runtimeFile in $runtimeFiles) {
+            Invoke-Checked $signTool @('sign', '/sha1', $env:UMBRELLA_SIGN_CERT_SHA1, '/fd', 'SHA256', '/tr', 'http://timestamp.digicert.com', '/td', 'SHA256', (Join-Path $stage $runtimeFile))
+        }
         $signCommand = '"' + $signTool + '" sign /sha1 ' + $env:UMBRELLA_SIGN_CERT_SHA1 + ' /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $q$f$q'
         $arguments += @('/DSignedRelease', "/Srelease=$signCommand")
     }
@@ -37,7 +40,9 @@ try {
     $installer = Join-Path $dist "UmbrellaShell-$version-windows-x64-setup.exe"
     if ($Signed) {
         Invoke-Checked $signTool @('verify', '/pa', '/all', '/v', $installer)
-        Invoke-Checked $signTool @('verify', '/pa', '/all', '/v', (Join-Path $stage 'UmbrellaShell.exe'))
+        foreach ($runtimeFile in $runtimeFiles) {
+            Invoke-Checked $signTool @('verify', '/pa', '/all', '/v', (Join-Path $stage $runtimeFile))
+        }
     }
     $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($installer))" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii

@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $required = @('CMakeLists.txt', 'CMakePresets.json', 'src/app/main.cpp',
-    'src/core/updates/UpdatePolicy.h', 'src/platform/windows/ExplorerRecovery.cpp',
+    'src/core/updates/UpdatePolicy.h', 'src/presentation/Settings.qml',
     'packaging/windows/UmbrellaShell.iss', '.github/workflows/ci.yml', '.github/workflows/release.yml')
 foreach ($relative in $required) {
     if (!(Test-Path -LiteralPath (Join-Path $projectRoot $relative))) { throw "Missing $relative" }
