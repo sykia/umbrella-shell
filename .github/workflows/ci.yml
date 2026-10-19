@@ -1,4 +1,4 @@
-name: Build and package foundation
+name: Build and package Umbrella Shell
 on:
   push:
   pull_request:
@@ -62,3 +62,4 @@ jobs:
       - run: cmake -S . -B build/core -DUMBRELLA_BUILD_APP=OFF -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
       - run: cmake --build build/core
       - run: ctest --test-dir build/core --output-on-failure
+

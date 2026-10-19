@@ -55,7 +55,14 @@ jobs:
           ./scripts/Test-Foundation.ps1
           ./scripts/Test-PublicRepository.ps1
           ./scripts/Build-Package.ps1 -Signed
-      - name: Publish foundation release
+      - name: Verify signed deployment without Qt development paths
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
+          ./scripts/Test-DeployedApp.ps1
+      - name: Publish Umbrella Shell release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,3 +76,4 @@ jobs:
           if ($env:UMBRELLA_SIGN_CERT_SHA1) {
             Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:UMBRELLA_SIGN_CERT_SHA1" -Force -ErrorAction SilentlyContinue
           }
+

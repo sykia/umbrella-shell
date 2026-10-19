@@ -12,7 +12,10 @@
 AppId={{658AA198-41B7-4C4C-8CFD-24CDDCC72411}
 AppName=Umbrella Shell
 AppVersion={#AppVersion}
-AppPublisher=UmbrellaShell
+AppPublisher=sykia
+AppPublisherURL=https://github.com/sykia
+AppSupportURL=https://github.com/sykia/umbrella-shell/issues
+AppUpdatesURL=https://github.com/sykia/umbrella-shell/releases
 DefaultDirName={localappdata}\Programs\Umbrella Shell
 DefaultGroupName=Umbrella Shell
 PrivilegesRequired=lowest
@@ -87,3 +90,4 @@ begin
   if not Result then
     MsgBox('Umbrella taskbar menu could not be stopped. Close its menu and retry uninstalling.', mbError, MB_OK);
 end;
+
