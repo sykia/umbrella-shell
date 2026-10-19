@@ -73,7 +73,8 @@ autohide, поэтому переключатель явно возвращае�
   не FPS или гарантированная оценка на другом компьютере. Измерения полного GUI/GPU
   и масштабирования ещё не сделаны.
 
-Полное C++ GUI не собиралось; просмотр использует Python/Qt с этой же C++ DLL.
+Описанные локальные desktop-наблюдения получены в Python/Qt-просмотре с C++ DLL;
+статус полной C++ сборки вынесен в VERIFICATION.md.
 Другие DPI, RDP, смена топологии, installer/VM и все flyout/drag-and-drop сценарии
 остаются отдельной проверкой. Путь внутренней функции не является контрактом Microsoft.
 
@@ -96,7 +97,7 @@ UIA работает в отдельном MTA worker host; восстановл
 ARCHITECTURE.md. Поддержка иных DPI и всех flyout/drag сценариев не проверена.
 
 --fixture дополнен проверкой толщины, недопустимых 47/97 DIP, трёх непересекающихся
-регионов, пустой и устаревшей масок. Полное Qt C++ GUI по-прежнему не собиралось;
+регионов, пустой и устаревшей масок. Эти проверки не подтверждают полный Qt C++ GUI;
 Windows-проверка использует тот же native DLL/host через Python/Qt-просмотр.
 
 Группы/толщина проверены на двух мониторах 2560×1440 при 96 DPI: 48/72/96 DIP,
@@ -143,8 +144,5 @@ subclass на скрытом тестовом окне этого класса �
 API: [Visual.BorderMode](https://learn.microsoft.com/uwp/api/windows.ui.composition.visual.bordermode),
 [CompositionGeometricClip](https://learn.microsoft.com/uwp/api/windows.ui.composition.compositiongeometricclip).
 
-## Статус полной сборки
 
-Упоминания локально не собранного GUI выше относятся к этапу native-прототипа.
-Свежие результаты полного C++/Qt и границы проверок приведены в
-[VERIFICATION.md](VERIFICATION.md). Это основной источник статуса сборки.
+Полная сборка, CTest и deployment: [VERIFICATION.md](VERIFICATION.md).

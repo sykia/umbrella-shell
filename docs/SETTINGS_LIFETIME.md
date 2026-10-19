@@ -36,15 +36,14 @@ releaseResources; это запрос Qt на освобождение ресу�
 
 ## Проверки
 
-Native DLL/host собраны MSVC x64. Test-MenuSettingsLaunch.ps1 подтвердил передачу
---settings, возврат к существующему скрытому тестовому владельцу через show,
-его полное завершение через quit и повторный quit при отсутствии владельца.
-Тестовый владелец не показывает GUI и не меняет системную панель.
+CTest `taskbar_menu_settings_launch` проверяет абсолютный sibling-путь, передачу
+--settings, show существующего скрытого владельца, полный/idempotent quit и ошибку
+отсутствующего exe. Используется fixture вместо настоящего GUI и системной панели.
 
-settings_window_lifetime_tests.cpp проверяет реальный Close/QWindow, сохранение
+CTest `settings_window_lifetime` проверяет настоящий Close/QWindow, сохранение
 event loop после закрытия, возврат того же окна, явный quit и обычное закрытие smoke.
-Он добавлен в CTest, но локально не собран: полного Qt C++ SDK здесь нет.
-Результаты Python-просмотра не подтверждают жизненный цикл полного C++ GUI.
-Полное C++ GUI, фактическая экономия GPU при скрытии и installer/VM не проверены.
+Smoke отдельно проверяет загрузку полного QML/D3D11. Результаты текущего CI:
+[VERIFICATION.md](VERIFICATION.md).
 
-Актуальные результаты полной сборки: [VERIFICATION.md](VERIFICATION.md).
+Экономия GPU при скрытии, длительный hidden/show цикл и installer/VM требуют
+отдельных измерений и испытаний; fixtures не доказывают эти свойства.
