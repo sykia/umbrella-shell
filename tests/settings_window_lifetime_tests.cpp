@@ -23,7 +23,9 @@ int main(int argc, char** argv) {
     std::fputs("lifetime: entering event loop\n", stderr);
     // A normal close must not enqueue an implicit quit before this timer runs.
     bool reached = false;
-    QTimer::singleShot(20, &app, [&] { reached = true; app.quit(); });
+    // Match the native explicit-shutdown path. QGuiApplication::quit() sends
+    // Close to hidden windows and is intentionally rejected by hide-on-close.
+    QTimer::singleShot(20, &app, [&] { reached = true; app.exit(0); });
     if (app.exec() != 0 || !reached) return 4;
     std::fputs("lifetime: checking smoke close\n", stderr);
     // Smoke windows retain ordinary close behavior.

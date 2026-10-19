@@ -32,7 +32,10 @@ bool SettingsWindowControl::nativeEventFilter(const QByteArray&, void* message, 
     if (native->message == RegisterWindowMessageW(settings_messages::show)) {
         window_.show(); window_.raise(); window_.requestActivate();
     } else if (native->message == RegisterWindowMessageW(settings_messages::quit)) {
-        app_.quit();
+        // QGuiApplication::quit closes even hidden windows first; our Close
+        // filter deliberately rejects that. Explicit shutdown must leave the
+        // event loop directly so normal stack/RAII restoration can run.
+        app_.exit(0);
     } else return false;
     if (result) *result = 0;
     return true;
