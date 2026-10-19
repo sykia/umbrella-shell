@@ -35,6 +35,18 @@ try {
         $signCommand = '"' + $signTool + '" sign /sha1 ' + $env:UMBRELLA_SIGN_CERT_SHA1 + ' /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $q$f$q'
         $arguments += @('/DSignedRelease', "/Srelease=$signCommand")
     }
+    $runtimeInventory = @(Get-ChildItem -LiteralPath $stage -Recurse -File |
+        Where-Object { $_.Extension -in @('.exe', '.dll') } |
+        Sort-Object FullName | ForEach-Object {
+            [ordered]@{
+                path = [IO.Path]::GetRelativePath($stage, $_.FullName).Replace('\', '/')
+                sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                product = $_.VersionInfo.ProductName
+                fileVersion = $_.VersionInfo.FileVersion
+            }
+        })
+    [ordered]@{ version = $version; signed = [bool]$Signed; files = $runtimeInventory } |
+        ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'docs/runtime-inventory.json') -Encoding utf8
     $arguments += 'packaging/windows/UmbrellaShell.iss'
     Invoke-Checked $iscc $arguments
     $installer = Join-Path $dist "UmbrellaShell-$version-windows-x64-setup.exe"

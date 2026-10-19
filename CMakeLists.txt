@@ -66,10 +66,14 @@ if(UMBRELLA_BUILD_APP)
     set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${CMAKE_INSTALL_BINDIR})
     include(InstallRequiredSystemLibraries)
     # Include QML imports in the standalone Windows deployment.
-    qt_generate_deploy_qml_app_script(TARGET UmbrellaShell OUTPUT_SCRIPT deploy_script)
+    qt_generate_deploy_qml_app_script(TARGET UmbrellaShell OUTPUT_SCRIPT deploy_script
+        DEPLOY_TOOL_OPTIONS --no-opengl-sw)
     install(SCRIPT ${deploy_script})
     install(FILES README.md CHANGELOG.md DESTINATION .)
-    install(DIRECTORY docs/ DESTINATION docs FILES_MATCHING PATTERN "*.md")
+    install(DIRECTORY docs/ DESTINATION docs FILES_MATCHING PATTERN "*.md"
+        PATTERN "licenses" EXCLUDE PATTERN "AGENTS*.md" EXCLUDE)
+    install(DIRECTORY docs/licenses/ DESTINATION docs/licenses
+        PATTERN "AGENTS*.md" EXCLUDE PATTERN ".agents" EXCLUDE PATTERN ".codex" EXCLUDE)
     if(BUILD_TESTING)
         add_executable(umbrella_menu_patch_tests tests/taskbar_menu_patch_tests.cpp)
         target_include_directories(umbrella_menu_patch_tests PRIVATE src)

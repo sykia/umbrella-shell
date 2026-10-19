@@ -1,4 +1,4 @@
-name: Signed GitHub Release
+name: GitHub Release
 on:
   push:
     tags: ['v*']
@@ -32,13 +32,19 @@ jobs:
         run: |
           choco upgrade innosetup --version=6.4.3 --allow-downgrade --yes --no-progress
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup provisioning failed' }
-      - name: Import release certificate
+      - name: Prepare optional release signing
+        id: signing
         shell: pwsh
         env:
           CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
           CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if (!$env:CERTIFICATE -or !$env:CERTIFICATE_PASSWORD) { throw 'Release signing is mandatory.' }
+          if (!$env:CERTIFICATE -and !$env:CERTIFICATE_PASSWORD) {
+            'enabled=false' >> $env:GITHUB_OUTPUT
+            Write-Output 'Publishing an explicitly unsigned preview; automatic updates remain disabled.'
+            exit 0
+          }
+          if (!$env:CERTIFICATE -or !$env:CERTIFICATE_PASSWORD) { throw 'Incomplete signing configuration.' }
           $certFile = Join-Path $env:RUNNER_TEMP 'umbrella-signing.pfx'
           [IO.File]::WriteAllBytes($certFile, [Convert]::FromBase64String($env:CERTIFICATE))
           try {
@@ -49,13 +55,17 @@ jobs:
           $tool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
           if (!$tool) { throw 'Windows SDK signing tool missing' }
           $tool.DirectoryName >> $env:GITHUB_PATH
-      - name: Build and sign application, uninstaller and setup
+          'enabled=true' >> $env:GITHUB_OUTPUT
+      - name: Build, test and package application
         shell: pwsh
+        env:
+          SIGNED_RELEASE: ${{ steps.signing.outputs.enabled }}
         run: |
           ./scripts/Test-Foundation.ps1
           ./scripts/Test-PublicRepository.ps1
-          ./scripts/Build-Package.ps1 -Signed
-      - name: Verify signed deployment without Qt development paths
+          if ($env:SIGNED_RELEASE -eq 'true') { ./scripts/Build-Package.ps1 -Signed }
+          else { ./scripts/Build-Package.ps1 }
+      - name: Verify deployment without Qt development paths
         shell: pwsh
         run: |
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
@@ -66,8 +76,21 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED_RELEASE: ${{ steps.signing.outputs.enabled }}
         run: |
-          gh release create "$env:GITHUB_REF_NAME" ./dist/* --verify-tag --title "Umbrella Shell $env:GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
+          $preview = $env:SIGNED_RELEASE -ne 'true'
+          $existing = gh release view "$env:GITHUB_REF_NAME" --json isDraft,targetCommitish 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            if (!$release.isDraft -or $release.targetCommitish -ne $env:GITHUB_SHA) { throw 'Only the prepared draft for this exact commit may be published.' }
+            gh release upload "$env:GITHUB_REF_NAME" ./dist/*
+            if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; existing assets are never overwritten.' }
+            gh release edit "$env:GITHUB_REF_NAME" --draft=false "--prerelease=$($preview.ToString().ToLowerInvariant())" --title "Umbrella Shell $env:GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md
+          } else {
+            $flags = @()
+            if ($preview) { $flags += '--prerelease' }
+            gh release create "$env:GITHUB_REF_NAME" ./dist/* --verify-tag --title "Umbrella Shell $env:GITHUB_REF_NAME" --notes-file docs/RELEASE_NOTES.md @flags
+          }
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
       - name: Remove signing certificate
         if: always()
