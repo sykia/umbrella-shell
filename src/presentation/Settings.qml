@@ -95,13 +95,13 @@ Rectangle {
     }
     Column {
         x:30; y:144; width:root.sidebarWidth - 36; spacing:5
-        height:root.taskbarExpanded ? 81 : 0
+        height:root.taskbarExpanded ? 124 : 0
         opacity:root.taskbarExpanded ? 1 : 0
         visible:root.phase === 3 && height > 0; clip:true
         Behavior on height { NumberAnimation { duration:180; easing.type:Easing.OutCubic } }
         Behavior on opacity { NumberAnimation { duration:160 } }
         Repeater {
-            model:[{key:"settings",label:"Основные настройки"},{key:"configuration",label:"Конфигурация панели"}]
+            model:[{key:"settings",label:"Основные настройки"},{key:"configuration",label:"Конфигурация панели"},{key:"dock",label:"Dock"}]
             Rectangle {
                 required property var modelData
                 objectName:"taskbarNavigation_" + modelData.key
@@ -128,6 +128,11 @@ Rectangle {
         ScrollBar.horizontal.policy:ScrollBar.AlwaysOff
         Behavior on opacity { NumberAnimation { duration:200 } }
         TaskbarConfiguration { width:parent.width; system:taskbarSystem; scrollTarget:configurationScroll.contentItem }
+    }
+    Loader {
+        x: root.contentLeft + 14; y: 28; width: root.width-x-26; height: root.height-54
+        active: typeof dockSystem !== "undefined" && root.phase === 3 && !root.homeOpen && root.taskbarSection === "dock"
+        sourceComponent: DockPage {}
     }
     TaskbarPage {
         id: taskbarPage

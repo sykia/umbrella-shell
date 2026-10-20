@@ -5,16 +5,19 @@ import QtQuick.Layouts
 Item {
     id: page
     objectName: "taskbarPage"
+    property var dock: typeof dockSystem !== "undefined" ? dockSystem : null
     property string edge: system ? system.edge : "bottom"
     property bool detached: system ? (system.detached || system.islands) : false
     property real transparency: system ? system.transparency : 35
     property int thickness: system ? system.thickness : 48
     property bool islands: system ? system.islands : false
     property real widthPercent: system ? system.widthPercent : 100
-    readonly property string panelStyle: islands ? "islands" : detached ? "detached" : "attached"
+    readonly property string panelStyle: dock && dock.enabled ? "dock" : islands ? "islands" : detached ? "detached" : "attached"
     property int separateThickness: system && system.detached && !system.islands ? system.thickness : 48
     property int islandThickness: system && system.islands ? system.thickness : 72
     function selectStyle(style) {
+        if (style === "dock") { if (dock) dock.setEnabled(true); return }
+        if (dock && dock.enabled) dock.setEnabled(false)
         if (style === panelStyle || (style === "islands" && !widthAvailable)) return
         if (panelStyle === "detached") separateThickness = thickness
         if (panelStyle === "islands") islandThickness = thickness
@@ -279,6 +282,10 @@ Item {
                             opacity: enabled ? 1 : 0.35
                             onClicked: page.selectStyle("islands")
                             Accessible.name: "Вид панели: Островки"
+                        }
+                        Choice {
+                            Layout.fillWidth: true; text: "Dock"; selected: page.panelStyle === "dock"; enabled: page.dock !== null
+                            onClicked: page.selectStyle("dock")
                         }
                     }
                 }

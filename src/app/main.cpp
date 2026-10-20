@@ -1,5 +1,6 @@
 #include "Version.h"
 #include "TaskbarSettings.h"
+#include "DockController.h"
 #include "SettingsWindowLifetime.h"
 #include "platform/windows/SettingsWindowControl.h"
 #include "platform/windows/TaskbarRuntime.h"
@@ -71,17 +72,20 @@ int main(int argc, char* argv[]) {
     }
     if (resume) {
         QSettings saved(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
-        if (!saved.value("resumeAppearance", saved.contains("edge")).toBool()) return 0;
+        if (!saved.value("resumeAppearance", saved.contains("edge")).toBool() && !saved.value("dock/enabled", false).toBool()) return 0;
     }
     app.setWindowIcon(QIcon(":/assets/umbrella.png"));
     TaskbarSettings taskbarSettings;
+    DockController dock;
     QQuickView view;
+    dock.attachEngine(*view.engine());
     SettingsWindowLifetime settingsLifetime(app, view, !smoke);
     view.setPersistentGraphics(false);
     view.setPersistentSceneGraph(false);
     QObject::connect(&view, &QWindow::visibleChanged, &view, [&view](bool visible) {
         if (!visible) view.releaseResources();
     });
+    view.rootContext()->setContextProperty("dockSystem", &dock);
     view.rootContext()->setContextProperty("taskbarSystem", &taskbarSettings);
     view.setFlags(Qt::Window | Qt::FramelessWindowHint);
     auto format = view.format();
@@ -108,6 +112,15 @@ int main(int argc, char* argv[]) {
     const bool backdrop = umbrella::platform::applyWindowBackdrop(view);
     view.rootObject()->setProperty("backdropAvailable", backdrop);
     if (!backdrop) QTextStream(stderr) << "System blur unavailable; using opaque fallback.\n";
+    QObject::connect(&dock, &DockController::settingsRequested, &view, [&view](bool dockPage) {
+        if (dockPage && view.rootObject()) { view.rootObject()->setProperty("homeOpen", false); view.rootObject()->setProperty("taskbarExpanded", true); view.rootObject()->setProperty("taskbarSection", "dock"); }
+        view.show(); view.raise(); view.requestActivate();
+    });
+    QObject::connect(&dock, &DockController::quitRequested, &app, [&app] { app.exit(0); });
+    if (!smoke) dock.restore();
+    QObject::connect(&taskbarSettings, &TaskbarSettings::changed, &dock, [&dock] {
+        if (dock.enabled()) umbrella::platform::TaskbarRuntime::setLoginResume(true);
+    });
     if (!resume) view.show();
     bool restorationAttempted = false, restorationSucceeded = false;
     if (!smoke) QObject::connect(&taskbarSettings, &TaskbarSettings::changed, &app, [&] {
