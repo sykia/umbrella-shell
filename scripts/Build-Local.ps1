@@ -56,6 +56,8 @@ try {
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_policy_tests.exe",'tests/update_policy_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_placement_tests.exe",'tests/taskbar_placement_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_reorder_tests.exe",'tests/taskbar_reorder_tests.cpp') + $link)
+    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_xaml_layout_tests.exe",'tests/taskbar_xaml_layout_tests.cpp') + $link + @('/MANIFEST:NO','windowsapp.lib','user32.lib'))
+    Copy-Item -LiteralPath tests/taskbar_xaml_layout_tests.manifest -Destination "$destination/umbrella_xaml_layout_tests.exe.manifest"
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_session_tests.exe",'tests/taskbar_session_tests.cpp','src/platform/windows/TaskbarModuleSession.cpp') + $link + $libraries)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_menu_patch_tests.exe",'tests/taskbar_menu_patch_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_settings_lifetime_tests.exe",'tests/settings_window_lifetime_tests.cpp') + $link + @('Qt6Core.lib','Qt6Gui.lib','user32.lib'))

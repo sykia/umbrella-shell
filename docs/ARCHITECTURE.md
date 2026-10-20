@@ -117,6 +117,11 @@ Core taskbar/Reorder.h рассчитывает группы по текущим
 в обратном порядке при отказе/исключении. Persistence допустим только после Applied.
 Действующий TranslationAdapter Task View подключён к этому механизму; возможность
 планировать несколько групп в core не означает их native-поддержку в Explorer.
+LayoutSlotAdapter проверен отдельно на настоящих Windows XAML-кнопках в собственном
+offscreen tool HWND: Arrange меняет layout slot без Translation/reparenting,
+сохраняется вызов исходного Click через automation peer. Он пока не подключён к
+Explorer, поскольку там caller не подтвердил владение layout-pass. Fixture требует
+sidecar manifest desktop UWP XAML, не устанавливается и не запускается через CTest.
 
 Диагностика компонентов использует отдельные versioned WM_COPYDATA packets в том же
 native-host, без изменения существующего edit ABI. ComponentRegistry определяет

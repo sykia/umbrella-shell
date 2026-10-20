@@ -89,6 +89,16 @@ if(UMBRELLA_BUILD_APP)
         PATTERN "AGENTS*.md" EXCLUDE PATTERN ".agents" EXCLUDE PATTERN ".codex" EXCLUDE)
     if(BUILD_TESTING)
         find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+        # Explicit private-process XAML experiment; no Explorer or global input.
+        add_executable(umbrella_xaml_layout_tests EXCLUDE_FROM_ALL tests/taskbar_xaml_layout_tests.cpp)
+        target_link_libraries(umbrella_xaml_layout_tests PRIVATE umbrella_core windowsapp user32)
+        target_compile_definitions(umbrella_xaml_layout_tests PRIVATE WINRT_NO_SOURCE_LOCATION UNICODE _UNICODE NOMINMAX)
+        target_compile_options(umbrella_xaml_layout_tests PRIVATE /utf-8)
+        target_link_options(umbrella_xaml_layout_tests PRIVATE /MANIFEST:NO)
+        add_custom_command(TARGET umbrella_xaml_layout_tests POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/taskbar_xaml_layout_tests.manifest
+                $<TARGET_FILE:umbrella_xaml_layout_tests>.manifest VERBATIM)
         add_executable(umbrella_session_tests tests/taskbar_session_tests.cpp)
         target_link_libraries(umbrella_session_tests PRIVATE Qt6::Core umbrella_platform)
         target_compile_options(umbrella_session_tests PRIVATE /utf-8)

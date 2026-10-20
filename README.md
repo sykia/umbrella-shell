@@ -93,6 +93,11 @@ ctest --preset release
 
 Независимый core без Qt/Windows:
 
+Core-тесты включают расчёт групп Taskbar и транзакционный откат. Отдельный target
+`umbrella_xaml_layout_tests` проверяет реальные Windows XAML-кнопки в собственном
+offscreen-окне; это не проверка перестановки компонентов Explorer. Его ограничения
+и запуск описаны в [конструкторе](docs/TASKBAR_CONFIGURATION.md).
+
 ```powershell
 cmake -S . -B build/core -DUMBRELLA_BUILD_APP=OFF -DBUILD_TESTING=ON
 cmake --build build/core --config Release

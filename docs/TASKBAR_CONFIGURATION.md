@@ -30,6 +30,31 @@ Fixture проверяет несколько ролей/областей, ро�
 отказ verify и неудачный rollback. Это тест общего механизма на adapters-mocks;
 перенос нескольких оригинальных компонентов Explorer этим не подтверждён.
 
+Дополнительно реализован LayoutSlotAdapter, который меняет настоящий Arrange-slot,
+а не Translation, сохраняя исходные margins/размеры и родительскую коллекцию.
+Он проверяет слот и фактическую геометрию, отклоняет повторную привязку одного
+объекта. Adapter пока используется **только изолированным XAML-fixture**, не модулем
+Explorer: его caller должен владеть layout-pass; обычное совпадение parent не даёт
+этого права. Нужен отдельный подтверждённый adapter/owner layout ItemsRepeater.
+
+`umbrella_xaml_layout_tests` создаёт только собственное offscreen tool HWND и XAML
+island. Проверены три настоящие кнопки Windows XAML: изменение slots, неизменные
+Translation/TabIndex/коллекция исходных объектов, Click исходной кнопки через её
+automation peer (без SendInput), подтверждённый обратный перенос. Глобальный foreground
+не меняется. Повторная раскладка родителя отвергает старый снимок перед первой
+записью. Это не физический hit-test и не проверка системных Taskbar flyout/keyboard.
+Fixture не входит в автоматический CTest; его явная сборка:
+`cmake --build --preset release --target umbrella_xaml_layout_tests`.
+Build-Local.ps1 также собирает exe с обязательным `.exe.manifest` рядом;
+sidecar нужен для [инициализации desktop UWP XAML](https://learn.microsoft.com/en-us/windows/uwp/xaml-islands/host-standard-control-with-xaml-islands-cpp).
+Не копировать один exe без manifest и не устанавливать fixture вместо приложения.
+
+Измерение текущего Release core-planner: 1000 схем по 64 объекта — 16–18 мс
+в двух локальных прогонах. Это время fixture алгоритма, без IPC, native apply,
+drag и render; сравнения с прежним planner нет. Изменение ресурсов Explorer
+по-прежнему не измерялось. Полная прямая сборка MSVC/Qt и core/IPC/geometry fixtures
+второго этапа прошли; CMake/installer/VM не запускались.
+
 Добавлены fail-closed проверки конечности координат, границ и столкновений и
 проверка фактического TransformBounds после native-записи перед подтверждением.
 Инвалидированная привязка снимается и пересоздаётся один раз по следующему запросу.
