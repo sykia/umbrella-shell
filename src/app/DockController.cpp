@@ -12,6 +12,7 @@
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QFileInfo>
+#include <QDir>
 #include <QUrl>
 #include <algorithm>
 
@@ -22,7 +23,7 @@ QVariantMap defaults() {
     return {{"edge","bottom"},{"alignment",1},{"margin",10},{"iconSize",48},{"spacing",8},{"radius",18},
         {"opacity",85},{"blur",true},{"indicators",true},{"magnification",20},{"hideMode",0},{"hideDelay",600},
         {"revealDelay",180},{"hideFullscreen",true},{"animations",true},{"speed",100},{"allScreens",false},
-        {"screen",QString{}},{"showRunning",true},{"theme","auto"}};
+        {"screen",QString{}},{"showRunning",true},{"theme","auto"},{"shadows",true}};
 }
 bool validate(const QString& key, const QVariant& value) {
     const QHash<QString,QPair<int,int>> ranges{{"alignment",{0,2}},{"margin",{0,80}},{"iconSize",{24,80}},
@@ -32,13 +33,13 @@ bool validate(const QString& key, const QVariant& value) {
     if (key == "edge") return QStringList{"bottom","top","left","right"}.contains(value.toString());
     if (key == "theme") return QStringList{"auto","light","dark"}.contains(value.toString());
     if (key == "screen") return value.toString().size() <= 128;
-    return QStringList{"blur","indicators","hideFullscreen","animations","allScreens","showRunning"}.contains(key) && value.metaType().id() == QMetaType::Bool;
+    return QStringList{"blur","indicators","hideFullscreen","animations","allScreens","showRunning","shadows"}.contains(key) && value.metaType().id() == QMetaType::Bool;
 }
 QString token(const umbrella::platform::DockWindow& window) {
     return QString("%1:%2:%3").arg(window.handle).arg(window.processId).arg(window.processCreated);
 }
 bool matches(const DockApp& app, const DockApp& window) {
-    return app.id==window.id || (window.aumid.isEmpty() && !app.executable.isEmpty() && app.executable.compare(window.executable,Qt::CaseInsensitive)==0);
+    return app.id==window.id || ((window.aumid.isEmpty() || app.aumid.isEmpty()) && !app.executable.isEmpty() && app.executable.compare(window.executable,Qt::CaseInsensitive)==0);
 }
 class Icons final : public QQuickImageProvider {
 public:
@@ -57,9 +58,12 @@ struct DockController::Surface {
     std::unique_ptr<QQuickView> view;
     QScreen* screen = nullptr;
     QTimer* timer = nullptr;
+    QTimer* fadeTimer = nullptr;
     QRect shown;
     bool hidden = false, hovered = false, menu = false, wantHidden = false;
+    bool concealed = false;
     int backdropState = -1;
+    QVariantMap appliedOptions;
 };
 DockController::DockController(QObject* parent) : QAbstractListModel(parent), source_(this), config_(defaults()), theme_(DockWindows::theme()) {
     QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
@@ -84,19 +88,38 @@ DockController::DockController(QObject* parent) : QAbstractListModel(parent), so
         const auto pins = QJsonDocument::fromJson(pinBytes).array();
         if (pins.size() <= 128) for (const auto& pin : pins) {
             const auto p = pin.toObject();
-            auto app = DockWindows::application(p["path"].toString());
-            if (app.id.isEmpty()) continue;
+            const auto path=p["path"].toString();
+            if (path.size()>32768 || path.contains(QChar::Null)) continue;
+            auto app = DockWindows::application(path);
             const auto aumid=p["aumid"].toString();
+            if (app.id.isEmpty()) {
+                // A temporarily unavailable drive/package must not erase the user's pin.
+                const bool file=QDir::isAbsolutePath(path) && QStringList{"exe","lnk","appref-ms"}.contains(QFileInfo(path).suffix().toLower());
+                const bool packaged=path==QStringLiteral("shell:AppsFolder\\")+aumid && !aumid.isEmpty() && aumid.size()<=512;
+                if (!file && !packaged) continue;
+                app.path=path; app.title=p["title"].toString().left(256);
+                if (app.title.isEmpty()) app.title=QFileInfo(path).completeBaseName();
+                auto executable=p["executable"].toString();
+                if (!QDir::isAbsolutePath(executable) || executable.size()>32768 || executable.contains(QChar::Null)) executable=path;
+                app.executable=executable; app.id="path:"+QDir::toNativeSeparators(executable).toCaseFolded();
+            }
             if (!aumid.isEmpty() && aumid.size()<=512 && !aumid.contains(QChar::Null)) { app.aumid=aumid; app.id="app:"+aumid.toCaseFolded(); }
-            if (std::none_of(pins_.begin(),pins_.end(),[&](const auto& a){ return a.id == app.id; })) pins_.append(app);
+            if (std::none_of(pins_.begin(),pins_.end(),[&](const auto& a){ return matches(a,app); })) pins_.append(app);
         }
     }
     refreshTimer_.setInterval(90); refreshTimer_.setSingleShot(true);
+    persistenceTimer_.setInterval(180); persistenceTimer_.setSingleShot(true);
+    connect(&persistenceTimer_,&QTimer::timeout,this,&DockController::save);
     connect(&source_,&DockWindows::windowsChanged,this,[this] { if (!refreshTimer_.isActive()) refreshTimer_.start(); });
     connect(&refreshTimer_,&QTimer::timeout,this,&DockController::refresh);
     connect(&source_,&DockWindows::snapshotReady,this,[this](const auto& snapshot) { if (enabled_) reconcile(snapshot); });
-    connect(&source_,&DockWindows::themeChanged,this,[this] { theme_ = DockWindows::theme(); emit themeChanged(); layoutSurfaces(); });
-    const auto topology = [this] { emit screensChanged(); if (enabled_) rebuildSurfaces(); };
+    connect(&source_,&DockWindows::themeChanged,this,[this] {
+        const auto updated=DockWindows::theme();
+        if (updated==theme_) return;
+        theme_=updated; emit themeChanged(); layoutSurfaces();
+    });
+    refreshScreenIds();
+    const auto topology = [this] { refreshScreenIds(); emit screensChanged(); if (enabled_) rebuildSurfaces(); };
     connect(qGuiApp,&QGuiApplication::screenAdded,this,topology);
     connect(qGuiApp,&QGuiApplication::screenRemoved,this,topology);
     connect(qGuiApp,&QGuiApplication::primaryScreenChanged,this,topology);
@@ -110,8 +133,9 @@ DockController::DockController(QObject* parent) : QAbstractListModel(parent), so
         connect(screen,&QScreen::availableGeometryChanged,this,[this] { layoutSurfaces(); });
         connect(screen,&QScreen::logicalDotsPerInchChanged,this,[this] { layoutSurfaces(); });
     });
+    reconcile({}); // Read saved pins without starting hooks, timers or desktop integration.
 }
-DockController::~DockController() { enabled_ = false; surfaces_.clear(); source_.stop(); }
+DockController::~DockController() { if (persistenceTimer_.isActive()) save(); enabled_ = false; surfaces_.clear(); source_.stop(); }
 void DockController::attachEngine(QQmlEngine& engine) { engine.addImageProvider("dock",new Icons(this)); }
 int DockController::rowCount(const QModelIndex& parent) const { return parent.isValid() ? 0 : static_cast<int>(entries_.size()); }
 QHash<int,QByteArray> DockController::roleNames() const { return {{Identity,"identity"},{Title,"appTitle"},{Icon,"iconSource"},{Pinned,"pinned"},{Count,"windowCount"},{Active,"appActive"},{Windows,"appWindows"}}; }
@@ -136,12 +160,15 @@ QVariant DockController::data(const QModelIndex& index, int role) const {
 }
 void DockController::report(const QString& text) { status_ = text; emit statusChanged(); }
 void DockController::save() {
+    persistenceTimer_.stop();
     QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
     saved.setValue("dock/enabled",enabled_);
     saved.setValue("dock/configV1",QJsonDocument(QJsonObject::fromVariantMap(config_)).toJson(QJsonDocument::Compact));
     saved.setValue("dock/monitorsV1",QJsonDocument(QJsonObject::fromVariantMap(monitorConfig_)).toJson(QJsonDocument::Compact));
-    QJsonArray pins; for (const auto& app : pins_) pins.append(QJsonObject{{"path",app.path},{"aumid",app.aumid}});
-    saved.setValue("dock/pinsV1",QJsonDocument(pins).toJson(QJsonDocument::Compact));
+    QJsonArray pins; for (const auto& app : pins_) pins.append(QJsonObject{{"path",app.path},{"aumid",app.aumid},{"title",app.title.left(256)},{"executable",app.executable}});
+    const auto encodedPins=QJsonDocument(pins).toJson(QJsonDocument::Compact);
+    if (encodedPins.size()<=262144) saved.setValue("dock/pinsV1",encodedPins);
+    else report(QStringLiteral("Список закреплений превышает предел 256 КиБ и не сохранён."));
     saved.sync();
     if (saved.status() != QSettings::NoError) report(QStringLiteral("Не удалось сохранить настройки Dock."));
 }
@@ -160,11 +187,11 @@ bool DockController::setEnabled(bool enabled) {
             if (!saved.contains("dock/pinsV1")) importWindowsPins();
         }
         refresh(); rebuildSurfaces();
-        if (surfaces_.empty()) { enabled_ = false; source_.stop(); report(QStringLiteral("Окно Dock не загрузилось.")); emit enabledChanged(); return false; }
+        if (surfaces_.empty()) { enabled_ = false; source_.stop(); save(); report(QStringLiteral("Окно Dock не загрузилось.")); emit enabledChanged(); return false; }
         if (!umbrella::platform::TaskbarRuntime::setLoginResume(true)) report(QStringLiteral("Dock работает, но автозапуск записать не удалось."));
         else report(QStringLiteral("Dock включён в совместимом режиме. Пуск, трей и приложения Windows остаются доступны на системной панели."));
     } else {
-        surfaces_.clear(); refreshTimer_.stop(); source_.stop();
+        surfaces_.clear(); refreshTimer_.stop(); source_.stop(); reconcile({});
         QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
         if (!saved.value("resumeAppearance",false).toBool()) umbrella::platform::TaskbarRuntime::setLoginResume(false);
         report(QStringLiteral("Dock выключен. Настройки системной панели сохранены."));
@@ -173,52 +200,82 @@ bool DockController::setEnabled(bool enabled) {
 }
 void DockController::configure(const QString& key, const QVariant& value) {
     if (!validate(key,value) || config_.value(key) == value) return;
-    config_[key] = value; save(); emit configChanged();
+    config_[key] = value; persistenceTimer_.start(); emit configChanged();
     if (enabled_) {
         if (key == "allScreens" || key == "screen") rebuildSurfaces();
         else { if (key == "showRunning") refresh(); layoutSurfaces(); }
     }
 }
 QVariantMap DockController::screenConfig(const QString& name) const {
-    auto values = config_; const auto overrides = monitorConfig_.value(name).toMap();
+    auto values = config_; const auto overrides = monitorConfig_.value(screenKey(name),monitorConfig_.value(name)).toMap();
     for (auto it = overrides.begin(); it != overrides.end(); ++it) values[it.key()] = it.value();
     return values;
 }
 void DockController::configureScreen(const QString& name, const QString& key, const QVariant& value) {
     if (name.size() > 128 || !QStringList{"edge","alignment","margin"}.contains(key) || !validate(key,value)) return;
-    if (!monitorConfig_.contains(name) && monitorConfig_.size() >= 16) return;
-    auto values = monitorConfig_.value(name).toMap(); values[key] = value; monitorConfig_[name] = values;
-    save(); emit configChanged(); layoutSurfaces();
+    const auto identity = screenKey(name);
+    if (!monitorConfig_.contains(identity) && monitorConfig_.size() >= 16) return;
+    auto values = monitorConfig_.value(identity).toMap(); values[key] = value; monitorConfig_[identity] = values;
+    persistenceTimer_.start(); emit configChanged(); layoutSurfaces();
 }
 QVariantList DockController::screens() const {
     QVariantList result;
-    for (auto screen : qGuiApp->screens()) result.append(QVariantMap{{"name",screen->name()},{"label",screen->name() + QString(" · %1×%2").arg(screen->size().width()).arg(screen->size().height())}});
+    for (auto screen : qGuiApp->screens()) result.append(QVariantMap{{"name",screen->name()},{"id",screenKey(screen->name())},{"label",screen->name() + QString(" · %1×%2").arg(screen->size().width()).arg(screen->size().height())}});
     return result;
 }
+void DockController::refreshScreenIds() {
+    screenIds_.clear();
+    for (const auto& entry : umbrella::platform::TaskbarRuntime::monitors()) {
+        const auto value=entry.toMap(); screenIds_.insert(value["device"].toString(),value["id"].toString());
+    }
+}
+QString DockController::screenKey(const QString& name) const { return screenIds_.value(name,name); }
 void DockController::importWindowsPins() {
     const auto imported = source_.importPins();
-    for (const auto& app : imported) if (pins_.size() < 128 && std::none_of(pins_.begin(),pins_.end(),[&](const auto& a) { return a.id == app.id; })) pins_.append(app);
+    for (const auto& app : imported) if (pins_.size() < 128 && std::none_of(pins_.begin(),pins_.end(),[&](const auto& a) { return matches(a,app); })) pins_.append(app);
     save(); refresh(); report(QStringLiteral("Импортированы доступные ярлыки Windows. Системный порядок и все packaged-закрепления публичным API не предоставляются; порядок можно изменить в Dock."));
 }
 bool DockController::addApplication(const QString& path) {
     if (pins_.size() >= 128) { report(QStringLiteral("Достигнут предел 128 закреплений.")); return false; }
     auto app = DockWindows::application(QUrl(path).isLocalFile() ? QUrl(path).toLocalFile() : path);
     if (app.id.isEmpty()) { report(QStringLiteral("Выберите существующий .exe, .lnk или .appref-ms.")); return false; }
-    if (std::none_of(pins_.begin(),pins_.end(),[&](const auto& a){ return a.id == app.id; })) pins_.append(app);
+    if (std::none_of(pins_.begin(),pins_.end(),[&](const auto& a){ return matches(a,app); })) pins_.append(app);
     save(); refresh(); return true;
 }
 void DockController::pin(int row) {
     if (row < 0 || row >= entries_.size()) return;
-    const auto app = entries_[row].app;
+    auto app = entries_[row].app;
     if (entries_[row].pinned) pins_.removeIf([&](const auto& a){ return a.id == app.id; });
-    else if (pins_.size() < 128) pins_.append(app);
+    else if (pins_.size() < 128) {
+        if (!app.aumid.isEmpty()) {
+            auto packaged=DockWindows::application(QStringLiteral("shell:AppsFolder\\")+app.aumid);
+            if (!packaged.id.isEmpty()) app=packaged;
+        }
+        pins_.append(app);
+    }
     save(); refresh();
 }
 void DockController::movePin(int from, int to) {
     if (from < 0 || to < 0 || from >= pins_.size() || to >= pins_.size() || from == to) return;
     pins_.move(from,to); save(); refresh();
 }
+void DockController::sortPins() {
+    std::stable_sort(pins_.begin(),pins_.end(),[](const auto& a,const auto& b) { return QString::localeAwareCompare(a.title,b.title)<0; });
+    save(); refresh();
+}
+void DockController::resetPinOrder() {
+    QList<DockApp> ordered;
+    for (const auto& system : source_.importPins())
+        for (const auto& pin : pins_) if (pin.id==system.id) ordered.append(pin);
+    for (const auto& pin : pins_) if (std::none_of(ordered.begin(),ordered.end(),[&](const auto& entry) { return entry.id==pin.id; })) ordered.append(pin);
+    pins_=ordered; save(); refresh();
+    report(QStringLiteral("Восстановлен доступный порядок ярлыков Windows; собственные приложения сохранены после них."));
+}
 void DockController::launch(int row) { if (row >= 0 && row < entries_.size() && !DockWindows::launch(entries_[row].app)) report(QStringLiteral("Windows не удалось запустить приложение.")); }
+int DockController::indexOf(const QString& identity) const {
+    for (int i=0;i<entries_.size();++i) if (entries_[i].app.id==identity) return i;
+    return -1;
+}
 void DockController::activate(int row) {
     if (row < 0 || row >= entries_.size()) return;
     const auto windows = entries_[row].windows;
@@ -228,10 +285,16 @@ void DockController::activate(int row) {
     if (!DockWindows::activate(windows[target],windows.size() == 1)) report(QStringLiteral("Windows отклонила переключение окна."));
 }
 void DockController::activateWindow(const QString& handle) {
-    for (const auto& window:windowSnapshot_) if (token(window)==handle) { DockWindows::activate(window,false); return; }
+    for (const auto& window:windowSnapshot_) if (token(window)==handle) {
+        if (!DockWindows::activate(window,false)) report(QStringLiteral("Windows отклонила переключение окна."));
+        return;
+    }
 }
 void DockController::closeWindow(const QString& handle) {
-    for (const auto& window:windowSnapshot_) if (token(window)==handle) { DockWindows::close(window); return; }
+    for (const auto& window:windowSnapshot_) if (token(window)==handle) {
+        if (!DockWindows::close(window)) report(QStringLiteral("Windows отклонила запрос закрытия окна."));
+        return;
+    }
 }
 void DockController::refresh() {
     if (enabled_) source_.requestSnapshot();
@@ -280,7 +343,7 @@ void DockController::rebuildSurfaces() {
     if (!enabled_) { rebuilding_ = false; return; }
     const auto available = qGuiApp->screens();
     QScreen* selected = qGuiApp->primaryScreen();
-    for (auto s : available) if (s->name() == config_["screen"].toString()) selected = s;
+    for (auto s : available) if (screenKey(s->name()) == config_["screen"].toString() || s->name() == config_["screen"].toString()) selected = s;
     for (auto screen : available) {
         if (!config_["allScreens"].toBool() && screen != selected) continue;
         auto surface = std::make_unique<Surface>(); surface->screen = screen;
@@ -289,17 +352,37 @@ void DockController::rebuildSurfaces() {
         view.setScreen(screen); view.setFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::WindowDoesNotAcceptFocus);
         view.setColor(Qt::transparent); view.setResizeMode(QQuickView::SizeRootObjectToView);
         view.setPersistentGraphics(false); view.setPersistentSceneGraph(false);
+        connect(&view,&QQuickWindow::sceneGraphError,this,[this](QQuickWindow::SceneGraphError,const QString&) {
+            QTimer::singleShot(0,this,[this] {
+                if (!enabled_) return;
+                setEnabled(false); report(QStringLiteral("Не удалось создать графику Dock. Системная панель остаётся доступна."));
+            });
+        });
         attachEngine(*view.engine());
         view.rootContext()->setContextProperty("dockSystem",this);
         view.rootContext()->setContextProperty("dockScreen",screen->name());
         view.setSource(QUrl("qrc:/qt/qml/Umbrella/Dock.qml"));
         if (view.status() != QQuickView::Ready) continue;
         surface->timer = new QTimer(&view); surface->timer->setSingleShot(true);
+        surface->fadeTimer = new QTimer(&view); surface->fadeTimer->setSingleShot(true);
         auto* raw = surface.get();
         connect(raw->timer,&QTimer::timeout,this,[this,raw] {
-            raw->hidden = raw->wantHidden;
-            if (raw->hidden) raw->view->releaseResources();
-            layoutSurfaces();
+            if (raw->wantHidden) {
+                raw->concealed=true;
+                raw->view->rootObject()->setProperty("concealed",true);
+                const bool animate=config_["animations"].toBool() && theme_["animations"].toBool();
+                raw->fadeTimer->start(animate ? 18000/config_["speed"].toInt() : 0);
+            } else {
+                raw->fadeTimer->stop(); raw->hidden=false;
+                layoutSurfaces();
+                QTimer::singleShot(0,raw->view.get(),[raw] {
+                    if (!raw->wantHidden) { raw->concealed=false; raw->view->rootObject()->setProperty("concealed",false); }
+                });
+            }
+        });
+        connect(raw->fadeTimer,&QTimer::timeout,this,[this,raw] {
+            if (!raw->wantHidden) return;
+            raw->hidden=true; layoutSurfaces(); raw->view->releaseResources();
         });
         view.show(); surfaces_.push_back(std::move(surface));
     }
@@ -327,28 +410,33 @@ void DockController::layoutSurfaces() {
         const auto workArea = surface->screen->availableGeometry();
         const int icon = values["iconSize"].toInt(), spacing = values["spacing"].toInt();
         const auto bounds = geometry({workArea.x(),workArea.y(),workArea.width(),workArea.height()},edge,
-            (rowCount()+1)*(icon+spacing)+36,icon+32,values["margin"].toInt(),values["alignment"].toInt());
+            (rowCount()+1)*(icon+spacing)+36,qRound(icon*(1+values["magnification"].toInt()/100.0))+28,values["margin"].toInt(),values["alignment"].toInt());
         surface->shown = QRect(bounds.x,bounds.y,bounds.width,bounds.height);
         bool overlap = false, fullscreen = false;
         for (const auto& window : windowSnapshot_) if (window.active && window.screen == surface->screen->name()) {
             fullscreen = window.fullscreen;
             // Win32 rectangles use physical coordinates; convert the Qt surface against this monitor origin.
             const auto factor = surface->screen->devicePixelRatio();
-            const QRect physical(window.monitorRect.x()+qRound((bounds.x-screen.x())*factor),window.monitorRect.y()+qRound((bounds.y-screen.y())*factor),qRound(bounds.width*factor),qRound(bounds.height*factor));
+            const auto p=physicalRect(bounds,{screen.x(),screen.y(),screen.width(),screen.height()},
+                {window.monitorRect.x(),window.monitorRect.y(),window.monitorRect.width(),window.monitorRect.height()},factor);
+            const QRect physical(p.x,p.y,p.width,p.height);
             overlap = window.rect.intersects(physical);
         }
         const bool want = shouldHide(values["hideMode"].toInt(),surface->hovered,surface->menu,overlap,fullscreen,values["hideFullscreen"].toBool());
+        if (!want && surface->concealed && !surface->hidden) {
+            surface->fadeTimer->stop(); surface->concealed=false;
+        }
         if (want != surface->wantHidden) {
             surface->wantHidden = want;
             surface->timer->start(values[want ? "hideDelay" : "revealDelay"].toInt());
-        } else if (want != surface->hidden && !surface->timer->isActive()) surface->timer->start(values[want ? "hideDelay" : "revealDelay"].toInt());
+        } else if (want != surface->hidden && !surface->timer->isActive() && !surface->fadeTimer->isActive()) surface->timer->start(values[want ? "hideDelay" : "revealDelay"].toInt());
         auto rect = surface->shown;
         if (surface->hidden) {
             if (vertical) { rect.setWidth(3); rect.moveLeft(edge == Edge::right ? screen.right()-2 : screen.left()); }
             else { rect.setHeight(3); rect.moveTop(edge == Edge::bottom ? screen.bottom()-2 : screen.top()); }
         }
-        root->setProperty("options",values);
-        root->setProperty("concealed",surface->hidden);
+        if (surface->appliedOptions!=values) { surface->appliedOptions=values; root->setProperty("options",values); }
+        root->setProperty("concealed",surface->concealed);
         if (view.geometry() != rect) view.setGeometry(rect);
         const bool dark = values["theme"] == "dark" || (values["theme"] == "auto" && theme_["dark"].toBool());
         const bool blur = values["blur"].toBool() && theme_["transparency"].toBool() && !surface->hidden;

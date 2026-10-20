@@ -3,6 +3,9 @@ import QtQuick.Controls
 
 Item {
     id: root
+    property bool preview: false
+    property string screenName: typeof dockScreen !== "undefined" ? dockScreen : ""
+    readonly property int appCount: apps.count
     property var options: dockSystem.config
     property bool concealed: false
     property bool backdropAvailable: false
@@ -11,16 +14,34 @@ Item {
     readonly property bool contrast: dockSystem.theme.contrast
     readonly property bool animate: options.animations && dockSystem.theme.animations
     readonly property int duration: animate ? Math.round(18000 / options.speed) : 0
+    property real entrance:0
+    property real presence:concealed ? 0 : 1
+    Component.onCompleted:entrance=1
+    Behavior on entrance { NumberAnimation { duration:root.duration } }
+    Behavior on presence { NumberAnimation { duration:root.duration } }
     readonly property color foreground: contrast ? dockSystem.theme.foreground : dark ? "#f4f4f4" : "#171717"
-    readonly property color surface: contrast ? dockSystem.theme.background : dark ? "#25272d" : "#f0f2f5"
-    property int hoverIndex: -2
+    readonly property color surface: contrast ? dockSystem.theme.background : options.theme === "auto"
+        ? Qt.tint(dark ? "#25272d" : "#f0f2f5", Qt.rgba(dockSystem.theme.accent.r,dockSystem.theme.accent.g,dockSystem.theme.accent.b,0.1))
+        : dark ? "#25272d" : "#f0f2f5"
+    property int hoverIndex: -100
     property int menuRow: -1
+    property string menuIdentity: ""
     property var menuWindows: []
     property bool menuPinned: false
     readonly property bool menuOpen: appMenu.opened || brandMenu.opened
-    function updateInteraction() { dockSystem.interaction(dockScreen, hover.hovered, menuOpen) }
+    function updateInteraction() { if (!preview) dockSystem.interaction(screenName, hover.hovered, menuOpen) }
     onMenuOpenChanged: updateInteraction()
     HoverHandler { id: hover; onHoveredChanged: root.updateInteraction() }
+    Repeater {
+        model: root.options.shadows && !root.contrast && !root.concealed ? 3 : 0
+        Rectangle {
+            required property int index
+            anchors.centerIn: parent
+            width: parent.width-index*2; height: parent.height-index*2
+            radius: root.options.radius+3-index
+            color: "#10000000"
+        }
+    }
     Rectangle {
         id: panel
         anchors.fill: parent
@@ -30,9 +51,10 @@ Item {
                   root.backdropAvailable && !root.contrast ? root.options.opacity / 100 : 1)
         border.color: root.contrast ? root.foreground : root.dark ? "#55ffffff" : "#33000000"
         border.width: root.concealed ? 0 : 1
-        opacity: root.concealed ? 0 : 1
+        opacity: root.presence*root.entrance
+        scale: root.concealed ? 0.96 : 1
         Behavior on color { ColorAnimation { duration: root.duration } }
-        Behavior on opacity { NumberAnimation { duration: root.duration } }
+        Behavior on scale { NumberAnimation { duration: root.duration; easing.type:Easing.OutCubic } }
         clip: true
         enabled: !root.concealed
         Item {
@@ -51,11 +73,16 @@ Item {
             MouseArea {
                 id: brandMouse; anchors.fill: parent; hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
-                onClicked: function(mouse) { if (mouse.button === Qt.RightButton) brandMenu.popup(); else dockSystem.showSettings() }
+                onClicked: function(mouse) { if (root.preview) return; if (mouse.button === Qt.RightButton) brandMenu.popup(); else dockSystem.showSettings() }
                 Accessible.name: "Umbrella — открыть настройки"; Accessible.role: Accessible.Button
             }
-            ToolTip.visible: brandMouse.containsMouse && !root.menuOpen
-            ToolTip.delay: 700; ToolTip.text: "Umbrella"
+            ToolTip {
+                popupType:Popup.Window
+                visible:brandMouse.containsMouse && !root.menuOpen && !root.concealed
+                delay:700; text:"Umbrella"
+                x:root.vertical ? (root.options.edge==="left" ? brand.width+8 : -width-8) : (brand.width-width)/2
+                y:root.vertical ? (brand.height-height)/2 : root.options.edge==="top" ? brand.height+8 : -height-8
+            }
         }
         Rectangle {
             x: root.vertical ? 12 : brand.x + brand.width + 4
@@ -78,6 +105,7 @@ Item {
             delegate: Item {
                 id: app
                 required property int index
+                required property string identity
                 required property string appTitle
                 required property string iconSource
                 required property bool pinned
@@ -85,7 +113,7 @@ Item {
                 required property bool appActive
                 required property var appWindows
                 readonly property real proximity: Math.max(0, 1-Math.abs(root.hoverIndex-index)*0.45)
-                readonly property real growth: root.options.magnification / 100 * proximity
+                readonly property real growth: root.animate ? root.options.magnification / 100 * proximity : 0
                 width: root.vertical ? apps.width : root.options.iconSize + 10 + growth*root.options.iconSize
                 height: root.vertical ? root.options.iconSize + 10 + growth*root.options.iconSize : apps.height
                 Behavior on width { NumberAnimation { duration: root.duration } }
@@ -98,7 +126,7 @@ Item {
                 }
                 Image {
                     id: icon; anchors.centerIn: parent
-                    width: Math.min(parent.width-8,parent.height-12); height: width
+                    width: Math.min(root.options.iconSize*(1+app.growth),parent.width-8,parent.height-8); height: width
                     source: app.iconSource; sourceSize.width: 80; sourceSize.height: 80
                     fillMode: Image.PreserveAspectFit; cache: false
                     scale: appMouse.pressed ? 0.88 : 1
@@ -118,13 +146,15 @@ Item {
                 }
                 MouseArea {
                     id: appMouse; anchors.fill: parent; hoverEnabled: true
+                    preventStealing:app.pinned
                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                     property real pressX: 0
                     property real pressY: 0
                     onEntered: root.hoverIndex = app.index
-                    onExited: if (root.hoverIndex === app.index) root.hoverIndex = -2
+                    onExited: if (root.hoverIndex === app.index) root.hoverIndex = -100
                     onPressed: function(mouse) { pressX=mouse.x; pressY=mouse.y }
                     onReleased: function(mouse) {
+                        if (root.preview) return
                         if (mouse.button !== Qt.LeftButton || !app.pinned) return
                         const p = mapToItem(apps.contentItem,mouse.x,mouse.y)
                         if (Math.abs(mouse.x-pressX)+Math.abs(mouse.y-pressY)>10) {
@@ -133,16 +163,22 @@ Item {
                         }
                     }
                     onClicked: function(mouse) {
+                        if (root.preview) return
                         if (Math.abs(mouse.x-pressX)+Math.abs(mouse.y-pressY)>10) return
                         if (mouse.button===Qt.RightButton) {
-                            root.menuRow=app.index; root.menuWindows=app.appWindows; root.menuPinned=app.pinned; appMenu.popup()
+                            root.menuRow=app.index; root.menuIdentity=app.identity; root.menuWindows=app.appWindows; root.menuPinned=app.pinned; appMenu.popup()
                         } else if (mouse.button===Qt.MiddleButton) dockSystem.launch(app.index)
                         else dockSystem.activate(app.index)
                     }
                     Accessible.name: app.appTitle; Accessible.role: Accessible.Button
                 }
-                ToolTip.visible: appMouse.containsMouse && !root.menuOpen && !appMouse.pressed
-                ToolTip.delay: 700; ToolTip.text: app.appTitle + (app.windowCount>1 ? " · " + app.windowCount + " окна" : "")
+                ToolTip {
+                    popupType:Popup.Window
+                    visible:appMouse.containsMouse && !root.menuOpen && !appMouse.pressed && !root.concealed
+                    delay:700; text:app.appTitle + (app.windowCount>1 ? " · " + app.windowCount + " окна" : "")
+                    x:root.vertical ? (root.options.edge==="left" ? app.width+8 : -width-8) : (app.width-width)/2
+                    y:root.vertical ? (app.height-height)/2 : root.options.edge==="top" ? app.height+8 : -height-8
+                }
             }
             ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded; visible: !root.vertical }
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; visible: root.vertical }
@@ -150,6 +186,9 @@ Item {
     }
     Menu {
         id: brandMenu
+        popupType:Popup.Window
+        palette.window:root.surface; palette.windowText:root.foreground; palette.text:root.foreground
+        enter: Transition { NumberAnimation { property:"opacity"; from:0; to:1; duration:root.duration } }
         MenuItem { text: "Открыть Umbrella"; onTriggered: dockSystem.showSettings() }
         MenuItem { text: "Настройки Dock"; onTriggered: dockSystem.showSettings(true) }
         MenuItem { text: "Выключить Dock"; onTriggered: Qt.callLater(function() { dockSystem.setEnabled(false) }) }
@@ -158,16 +197,19 @@ Item {
     }
     Menu {
         id: appMenu
-        MenuItem { text: "Открыть новый экземпляр"; onTriggered: dockSystem.launch(root.menuRow) }
-        MenuItem { text: root.menuPinned ? "Открепить" : "Закрепить"; onTriggered: dockSystem.pin(root.menuRow) }
-        MenuItem { text: "Переместить к началу"; enabled: root.menuPinned && root.menuRow>0; onTriggered: dockSystem.movePin(root.menuRow,root.menuRow-1) }
-        MenuItem { text: "Переместить к концу"; enabled: root.menuPinned; onTriggered: dockSystem.movePin(root.menuRow,root.menuRow+1) }
+        popupType:Popup.Window
+        palette.window:root.surface; palette.windowText:root.foreground; palette.text:root.foreground
+        enter: Transition { NumberAnimation { property:"opacity"; from:0; to:1; duration:root.duration } }
+        MenuItem { text: "Открыть новый экземпляр"; onTriggered: dockSystem.launch(dockSystem.indexOf(root.menuIdentity)) }
+        MenuItem { text: root.menuPinned ? "Открепить" : "Закрепить"; onTriggered: dockSystem.pin(dockSystem.indexOf(root.menuIdentity)) }
+        MenuItem { text: "Переместить к началу"; enabled: root.menuPinned && root.menuRow>0; onTriggered: {const i=dockSystem.indexOf(root.menuIdentity); dockSystem.movePin(i,i-1)} }
+        MenuItem { text: "Переместить к концу"; enabled: root.menuPinned; onTriggered: {const i=dockSystem.indexOf(root.menuIdentity); dockSystem.movePin(i,i+1)} }
         MenuSeparator {}
         Instantiator {
             model: root.menuWindows
             delegate: Menu {
                 required property var modelData
-                title: (modelData.active ? "● " : "") + modelData.title
+                title: (modelData.active ? "● " : "") + modelData.title + " · " + modelData.screen
                 MenuItem { text: "Переключиться"; onTriggered: dockSystem.activateWindow(modelData.handle) }
                 MenuItem { text: "Закрыть окно"; onTriggered: dockSystem.closeWindow(modelData.handle) }
             }

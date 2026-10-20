@@ -34,7 +34,10 @@ public:
     Q_INVOKABLE bool addApplication(const QString& path);
     Q_INVOKABLE void pin(int row);
     Q_INVOKABLE void movePin(int from, int to);
+    Q_INVOKABLE void sortPins();
+    Q_INVOKABLE void resetPinOrder();
     Q_INVOKABLE void activate(int row);
+    Q_INVOKABLE int indexOf(const QString& identity) const;
     Q_INVOKABLE void launch(int row);
     Q_INVOKABLE void activateWindow(const QString& handle);
     Q_INVOKABLE void closeWindow(const QString& handle);
@@ -59,10 +62,12 @@ private:
     QList<umbrella::platform::DockApp> pins_;
     umbrella::platform::DockWindows source_;
     QVariantMap config_, theme_, monitorConfig_;
+    QHash<QString,QString> screenIds_;
     QString status_;
     bool enabled_ = false;
     bool rebuilding_ = false;
     QTimer refreshTimer_;
+    QTimer persistenceTimer_;
     std::vector<std::unique_ptr<Surface>> surfaces_;
     void refresh();
     void reconcile(const QList<umbrella::platform::DockWindow>& windows);
@@ -70,4 +75,6 @@ private:
     void layoutSurfaces();
     void save();
     void report(const QString& text);
+    void refreshScreenIds();
+    QString screenKey(const QString& name) const;
 };

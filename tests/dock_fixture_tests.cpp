@@ -8,6 +8,8 @@
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QTextStream>
+#include <QDir>
+#include <QEventLoop>
 #include <cstdlib>
 
 void require(bool value, const char* message) { if (!value) { QTextStream(stderr) << message << '\n'; std::exit(1); } }
@@ -27,8 +29,9 @@ struct DockFixture {
         model.movePin(1,0); require(model.entries_[0].app.id==second.id,"Pin reorder");
         model.movePin(-1,100); require(model.rowCount()==2,"Invalid reorder altered model");
         umbrella::platform::DockWindow one; one.app=first; one.handle=123; one.title="First window"; one.active=true;
+        one.app.id="app:fixture.desktop"; one.app.aumid="Fixture.Desktop";
         auto two=one; two.handle=124; two.title="Second window"; two.active=false;
-        auto transient=one; transient.app.id="fixture:transient"; transient.app.executable=directory+"/third.exe"; transient.app.title="Transient"; transient.handle=125; transient.active=false;
+        auto transient=one; transient.app.id="fixture:transient"; transient.app.aumid.clear(); transient.app.executable=directory+"/third.exe"; transient.app.title="Transient"; transient.handle=125; transient.active=false;
         model.reconcile({one,two,transient});
         require(model.rowCount()==3,"Transient application absent");
         require(model.entries_[1].windows.size()==2,"Windows not grouped with pinned app");
@@ -37,7 +40,10 @@ struct DockFixture {
         require(model.rowCount()==2 && !model.data(model.index(1),DockController::Active).toBool(),"Closed app/foreground reconciliation");
         model.configure("iconSize",9000); require(model.config()["iconSize"].toInt()==48,"Invalid geometry accepted");
         model.configure("iconSize",64); model.configureScreen("fixture-monitor","edge","left");
-        { DockController restored; require(restored.rowCount()==0,"Read-only construction populated live model");
+        require(model.persistenceTimer_.isActive(),"Settings changes must coalesce disk writes"); model.save();
+        model.sortPins(); require(model.pins_[0].id==first.id,"Alphabetical pin sort");
+        model.movePin(0,1);
+        { DockController restored; require(restored.rowCount()==2 && !restored.enabled(),"Saved pins should load without enabling desktop integration");
           require(restored.pins_.size()==2 && restored.pins_[0].id==second.id,"Pin order persistence");
           require(restored.config()["iconSize"].toInt()==64 && restored.screenConfig("fixture-monitor")["edge"]=="left","Settings persistence"); }
         model.pin(1); model.reconcile({}); require(model.rowCount()==1,"Unpin closed application");
@@ -54,17 +60,44 @@ struct DockFixture {
             for (const auto& edge : {"bottom","top","left","right"}) {
                 auto options=model.config(); options["edge"]=edge;
                 root->setProperty("options",options); QCoreApplication::processEvents();
+                if (QString(name)=="Dock.qml") require(root->property("vertical").toBool()==(QString(edge)=="left" || QString(edge)=="right"),"Vertical layout state");
             }
+            model.theme_["contrast"]=true; model.theme_["animations"]=false; model.theme_["transparency"]=false; emit model.themeChanged();
+            if (QString(name)=="Dock.qml") require(root->property("contrast").toBool() && !root->property("animate").toBool(),"High contrast/reduced motion");
         }
         if (!warnings.isEmpty()) { QTextStream(stderr)<<warnings.join('\n')<<'\n'; require(false,"QML runtime warnings"); }
+        const auto snapshots=qEnvironmentVariable("UMBRELLA_DOCK_FIXTURE_DIR");
+        if (!snapshots.isEmpty()) {
+            require(QDir().mkpath(snapshots),"Screenshot directory");
+            QList<umbrella::platform::DockWindow> sample;
+            for (int i=0;i<4;++i) {
+                auto window=transient; window.app.id=QString("fixture:%1").arg(i); window.app.executable=QString("fixture:%1").arg(i);
+                window.app.title=QStringList{"Editor","Files","Terminal","Browser"}[i]; window.handle=200+i;
+                window.app.icon=QImage(64,64,QImage::Format_ARGB32_Premultiplied); window.app.icon.fill(QColor::fromHsv(i*70,130,220));
+                window.active=i==0; sample.append(window);
+            }
+            model.reconcile(sample); model.theme_["contrast"]=false; model.theme_["animations"]=true;
+            for (const bool vertical : {false,true}) {
+                QQuickView view; model.attachEngine(*view.engine());
+                view.rootContext()->setContextProperty("dockSystem",&model); view.rootContext()->setContextProperty("dockScreen","fixture-monitor");
+                view.setColor(Qt::transparent); view.setResizeMode(QQuickView::SizeRootObjectToView);
+                view.setSource(QUrl("qrc:/qt/qml/Umbrella/Dock.qml")); require(view.status()==QQuickView::Ready,"Screenshot QML");
+                auto options=model.config(); options["edge"]=vertical ? "left" : "bottom"; options["theme"]=vertical ? "dark" : "light";
+                view.rootObject()->setProperty("options",options); view.resize(vertical?108:520,vertical?520:108); view.show();
+                QEventLoop wait; QTimer::singleShot(250,&wait,&QEventLoop::quit); wait.exec();
+                require(view.grabWindow().save(snapshots+(vertical?"/dock-vertical-dark.png":"/dock-horizontal-light.png")),"Offscreen rendering");
+            }
+        }
         // Corruption is bounded and ignored rather than overwriting native settings.
         QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
         saved.setValue("dock/configV1",QByteArray(40000,'x')); saved.sync();
         DockController recovered; require(recovered.config()["iconSize"].toInt()==48,"Oversize config recovery");
+        require(QFile::remove(directory+"/second.exe"),"Remove temporary executable");
+        DockController unavailable; require(unavailable.pins_.size()==1 && unavailable.pins_[0].id==second.id,"Unavailable application pin was erased");
     }
 };
 int main(int argc,char** argv) {
-    qputenv("QT_QPA_PLATFORM","offscreen"); qputenv("QT_QUICK_CONTROLS_STYLE","Basic");
+    qputenv("QT_QPA_PLATFORM","offscreen"); qputenv("QT_QUICK_BACKEND","software"); qputenv("QT_QUICK_CONTROLS_STYLE","Basic");
     QGuiApplication app(argc,argv);
     QTemporaryDir directory; require(directory.isValid(),"Temporary profile");
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());

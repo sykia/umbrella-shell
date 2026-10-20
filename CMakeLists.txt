@@ -50,7 +50,7 @@ if(UMBRELLA_BUILD_APP)
     target_include_directories(umbrella_platform PUBLIC src)
     target_compile_features(umbrella_platform PUBLIC cxx_std_20)
     target_link_libraries(umbrella_platform PRIVATE Qt6::Gui dwmapi shell32 user32 gdi32 advapi32 ole32 propsys windowsapp)
-    target_compile_definitions(umbrella_platform PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
+    target_compile_definitions(umbrella_platform PRIVATE WINRT_NO_SOURCE_LOCATION UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX WINVER=0x0A00 _WIN32_WINNT=0x0A00)
     # Qt Quick owns the single rendering stack through its D3D11 RHI.
     add_library(umbrella_render INTERFACE)
     target_link_libraries(umbrella_render INTERFACE d3d11 dxgi)

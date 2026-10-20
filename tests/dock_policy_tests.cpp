@@ -17,6 +17,7 @@ int main() {
     require(!shouldHide(0,false,false,true,false,true),"Always visible policy");
     require(!shouldHide(2,false,false,false,false,true),"Smart hide without overlap");
     require(shouldHide(2,false,false,true,false,true),"Smart hide overlap");
-    require(orderedIdentities({"a","b","a"},{"b","c","","c"}) == std::vector<std::string>({"a","b","c"}),"Pinned order/deduplication");
+    const auto physical=physicalRect({-1200,100,400,80},{-1707,0,1707,960},{-2560,0,2560,1440},1.5);
+    require(physical.x==-1799 && physical.y==150 && physical.width==600 && physical.height==120,"Mixed DPI/negative origin conversion");
     std::cout << "Dock policy invariants passed\n";
 }

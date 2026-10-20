@@ -1,7 +1,6 @@
 #pragma once
 #include <algorithm>
-#include <vector>
-#include <string>
+#include <cmath>
 
 namespace umbrella::dock {
 enum class Edge { bottom, top, left, right };
@@ -22,11 +21,9 @@ inline bool shouldHide(int mode, bool hovered, bool menu, bool overlap, bool ful
     if (menu || hovered) return false;
     return (hideFullscreen && fullscreen) || mode == 1 || (mode == 2 && overlap);
 }
-// Pinned order is independent of the transient enumeration order of windows.
-inline std::vector<std::string> orderedIdentities(const std::vector<std::string>& pins, const std::vector<std::string>& running) {
-    std::vector<std::string> result;
-    for (const auto* source : {&pins, &running}) for (const auto& id : *source)
-        if (!id.empty() && std::find(result.begin(), result.end(), id) == result.end()) result.push_back(id);
-    return result;
+inline Rect physicalRect(Rect surface, Rect logicalMonitor, Rect physicalMonitor, double scale) {
+    return {physicalMonitor.x+static_cast<int>(std::lround((surface.x-logicalMonitor.x)*scale)),
+        physicalMonitor.y+static_cast<int>(std::lround((surface.y-logicalMonitor.y)*scale)),
+        static_cast<int>(std::lround(surface.width*scale)),static_cast<int>(std::lround(surface.height*scale))};
 }
 }

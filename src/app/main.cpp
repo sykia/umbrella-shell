@@ -125,14 +125,15 @@ int main(int argc, char* argv[]) {
     bool restorationAttempted = false, restorationSucceeded = false;
     if (!smoke) QObject::connect(&taskbarSettings, &TaskbarSettings::changed, &app, [&] {
         if (restorationAttempted && !taskbarSettings.pending())
-            umbrella::platform::TaskbarRuntime::writeRestoreReport(taskbarSettings.savedAppearanceRestored(), taskbarSettings.status());
+            umbrella::platform::TaskbarRuntime::writeRestoreReport(taskbarSettings.savedAppearanceRestored() || dock.enabled(),
+                dock.enabled() ? dock.status() : taskbarSettings.status());
     });
     if (!smoke) umbrella::platform::TaskbarRuntime::writeRestoreReport(false, QStringLiteral("Ожидание Explorer, панелей и мониторов."));
     if (!smoke && !runtime.start([&] {
         restorationAttempted = true;
         const bool handled = taskbarSettings.restoreSavedAppearance();
-        restorationSucceeded = taskbarSettings.savedAppearanceRestored();
-        umbrella::platform::TaskbarRuntime::writeRestoreReport(restorationSucceeded, taskbarSettings.status());
+        restorationSucceeded = taskbarSettings.savedAppearanceRestored() || dock.enabled();
+        umbrella::platform::TaskbarRuntime::writeRestoreReport(restorationSucceeded, dock.enabled() ? dock.status() : taskbarSettings.status());
         return handled;
     })) {
         QTextStream(stderr) << "Explorer lifecycle hooks unavailable.\n";

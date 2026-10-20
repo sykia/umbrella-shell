@@ -40,7 +40,14 @@ QImage iconImage(HICON icon) {
             // Legacy icons can have a zero alpha channel after GDI rendering.
             bool alpha = false;
             for (int y = 0; y < 64 && !alpha; ++y) for (int x = 0; x < 64; ++x) if (qAlpha(result.pixel(x,y))) { alpha = true; break; }
-            if (!alpha) for (int y = 0; y < 64; ++y) for (int x = 0; x < 64; ++x) result.setPixel(x,y,result.pixel(x,y) | 0xff000000);
+            if (!alpha) {
+                memset(bits,0xff,64*64*4);
+                if (DrawIconEx(dc,0,0,icon,64,64,0,nullptr,DI_MASK)) {
+                    const QImage mask(static_cast<uchar*>(bits),64,64,QImage::Format_RGB32);
+                    for (int y=0;y<64;++y) for (int x=0;x<64;++x)
+                        result.setPixel(x,y,qRed(mask.pixel(x,y))>127 ? 0 : result.pixel(x,y) | 0xff000000);
+                }
+            }
         }
         SelectObject(dc, previous);
     }
@@ -55,6 +62,32 @@ QString readAppId(IPropertyStore* store) {
         result = QString::fromWCharArray(value.pwszVal);
     PropVariantClear(&value);
     return result;
+}
+DockApp packagedApp(const QString& aumid) {
+    DockApp app;
+    if (aumid.isEmpty() || aumid.size()>512 || aumid.contains(QChar::Null)) return app;
+    const auto parsingName=QStringLiteral("shell:AppsFolder\\")+aumid;
+    ComPtr<IShellItem> item;
+    if (FAILED(SHCreateItemFromParsingName(reinterpret_cast<LPCWSTR>(parsingName.utf16()),nullptr,IID_PPV_ARGS(&item)))) return app;
+    app.id="app:"+normalized(aumid); app.aumid=aumid; app.path=parsingName;
+    PWSTR display=nullptr;
+    if (SUCCEEDED(item->GetDisplayName(SIGDN_NORMALDISPLAY,&display))) { app.title=QString::fromWCharArray(display); CoTaskMemFree(display); }
+    if (app.title.isEmpty()) app.title=aumid;
+    ComPtr<IShellItemImageFactory> images;
+    HBITMAP bitmap=nullptr;
+    if (SUCCEEDED(item.As(&images)) && SUCCEEDED(images->GetImage({64,64},SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,&bitmap))) {
+        BITMAP source{};
+        if (GetObjectW(bitmap,sizeof(source),&source) && source.bmWidth>0 && source.bmHeight>0 && source.bmWidth<=256 && source.bmHeight<=256) {
+            QImage image(source.bmWidth,source.bmHeight,QImage::Format_ARGB32_Premultiplied);
+            BITMAPINFO info{}; info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER); info.bmiHeader.biWidth=image.width(); info.bmiHeader.biHeight=-image.height();
+            info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=32; info.bmiHeader.biCompression=BI_RGB;
+            const HDC dc=CreateCompatibleDC(nullptr);
+            if (dc && GetDIBits(dc,bitmap,0,image.height(),image.bits(),&info,DIB_RGB_COLORS)) app.icon=image;
+            if (dc) DeleteDC(dc);
+        }
+        DeleteObject(bitmap);
+    }
+    return app;
 }
 bool eligible(HWND hwnd) {
     if (!IsWindow(hwnd) || !IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER)) return false;
@@ -146,6 +179,8 @@ void DockWindows::requestSnapshot() {
     },Qt::QueuedConnection);
 }
 DockApp DockWindows::application(const QString& path) {
+    const auto prefix=QStringLiteral("shell:AppsFolder\\");
+    if (path.startsWith(prefix,Qt::CaseInsensitive)) return packagedApp(path.mid(prefix.size()));
     DockApp app;
     const QFileInfo file(path);
     if (!file.isFile() || !QStringList{"exe","lnk","appref-ms"}.contains(file.suffix().toLower())) return app;
@@ -171,8 +206,11 @@ DockApp DockWindows::application(const QString& path) {
     return app;
 }
 QList<DockApp> DockWindows::importPins() const {
-    const auto directory = QDir::homePath() + "/AppData/Roaming/Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar";
     QList<DockApp> result;
+    PWSTR roaming=nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData,KF_FLAG_DEFAULT,nullptr,&roaming))) return result;
+    const auto directory=QString::fromWCharArray(roaming)+"/Microsoft/Internet Explorer/Quick Launch/User Pinned/TaskBar";
+    CoTaskMemFree(roaming);
     for (const auto& file : QDir(directory).entryInfoList({"*.lnk"},QDir::Files,QDir::Name)) {
         if (result.size() == 128) break;
         auto app = application(file.absoluteFilePath()); if (!app.id.isEmpty()) result.append(app);
@@ -199,12 +237,35 @@ QList<DockWindow> DockWindows::windows() const {
         if (SUCCEEDED(SHGetPropertyStoreForWindow(hwnd,IID_PPV_ARGS(&store)))) {
             auto windowId = readAppId(store.Get()); if (!windowId.isEmpty()) aumid = windowId;
         }
-        const auto executable = QString::fromWCharArray(path);
+        auto executable = QString::fromWCharArray(path);
+        // Frame-hosted UWP windows expose the packaged process through child HWNDs.
+        // Use public process/AUMID APIs; never group all packages under the host exe.
+        if (aumid.isEmpty() && QFileInfo(executable).fileName().compare("ApplicationFrameHost.exe",Qt::CaseInsensitive)==0) {
+            struct ChildIdentity { DWORD host; int inspected=0; QString path, aumid; } identity{pid};
+            EnumChildWindows(hwnd,[](HWND child,LPARAM data)->BOOL {
+                auto& found=*reinterpret_cast<ChildIdentity*>(data);
+                if (++found.inspected>64) return FALSE;
+                DWORD childPid=0; GetWindowThreadProcessId(child,&childPid);
+                if (!childPid || childPid==found.host) return TRUE;
+                const auto process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,childPid);
+                if (!process) return TRUE;
+                wchar_t app[512]{}, image[32768]{}; UINT32 count=512; DWORD size=32768;
+                if (GetApplicationUserModelId(process,&count,app)==ERROR_SUCCESS && QueryFullProcessImageNameW(process,0,image,&size)) {
+                    found.aumid=QString::fromWCharArray(app); found.path=QString::fromWCharArray(image);
+                }
+                CloseHandle(process); return found.aumid.isEmpty();
+            },reinterpret_cast<LPARAM>(&identity));
+            if (!identity.aumid.isEmpty()) { aumid=identity.aumid; executable=identity.path; }
+        }
         const auto id = aumid.isEmpty() ? "path:" + normalized(executable) : "app:" + normalized(aumid);
         auto& cache = c.self->impl_->cache;
         if (!cache.contains(id)) {
             if (cache.size() >= 512) cache.clear();
-            auto app = application(executable); app.id = id; app.aumid = aumid;
+            auto app = aumid.isEmpty() ? DockApp{} : packagedApp(aumid);
+            if (app.id.isEmpty()) app = application(executable);
+            if (app.path.isEmpty()) app.path=executable;
+            if (app.title.isEmpty()) app.title=QFileInfo(executable).completeBaseName();
+            app.executable=executable; app.id = id; app.aumid = aumid;
             DWORD_PTR icon = 0;
             if (SendMessageTimeoutW(hwnd,WM_GETICON,ICON_BIG,0,SMTO_ABORTIFHUNG,20,&icon) && icon) app.icon = iconImage(reinterpret_cast<HICON>(icon));
             cache.insert(id,app);
@@ -277,4 +338,3 @@ bool DockWindows::nativeEventFilter(const QByteArray&, void* message, qintptr*) 
     return false;
 }
 }
-

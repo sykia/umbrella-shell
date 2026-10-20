@@ -36,6 +36,18 @@ class Model(QObject):
     def resetAppearance(self):
         pass
 
+class DockModel(QObject):
+    changed = Signal()
+    def __init__(self):
+        super().__init__()
+        self.active = False
+    enabled = Property(bool, lambda self: self.active, notify=changed)
+    @Slot(bool, result=bool)
+    def setEnabled(self, value):
+        self.active = value
+        self.changed.emit()
+        return True
+
 def wait(milliseconds=260):
     loop = QEventLoop()
     QTimer.singleShot(milliseconds, loop.quit)
@@ -157,6 +169,17 @@ def main():
     require(page.property("thickness") == 60, "Separate style retains its own height")
     for control in (attached, separate, islands):
         require(bool(control.property("selected")) == (control is separate), "Exactly one panel style must be selected")
+    dock = DockModel()
+    page.setProperty("dock", dock)
+    previous = len(model.calls)
+    page.selectStyle("dock")
+    wait()
+    require(dock.active and page.property("panelStyle") == "dock" and len(model.calls) == previous,
+            "Enabling compatible Dock must preserve the native configuration")
+    page.selectStyle("detached")
+    wait()
+    require(not dock.active and page.property("thickness") == 60 and len(model.calls) == previous,
+            "Disabling Dock must restore the previous mode without an unnecessary native write")
     require(not warnings, "QML warnings: " + str(warnings))
     page.deleteLater()
     app.processEvents()

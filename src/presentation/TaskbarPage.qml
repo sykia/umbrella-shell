@@ -16,7 +16,8 @@ Item {
     property int separateThickness: system && system.detached && !system.islands ? system.thickness : 48
     property int islandThickness: system && system.islands ? system.thickness : 72
     function selectStyle(style) {
-        if (style === "dock") { if (dock) dock.setEnabled(true); return }
+        if (style === "dock") { liveApply.stop(); applyQueued=false; if (dock) dock.setEnabled(true); return }
+        if (style === "islands" && !widthAvailable) return
         if (dock && dock.enabled) dock.setEnabled(false)
         if (style === panelStyle || (style === "islands" && !widthAvailable)) return
         if (panelStyle === "detached") separateThickness = thickness
@@ -40,6 +41,7 @@ Item {
 
     Component.onCompleted: readyToApply = true
     function scheduleApply() {
+        if (dock && dock.enabled) return
         if (!readyToApply || !canApply || !system || !system.available) return
         applyQueued = true
         liveApply.restart()
@@ -49,7 +51,7 @@ Item {
         interval: 180
         repeat: false
         onTriggered: {
-            if (!page.applyQueued || !page.canApply || !page.system || !page.system.available) return
+            if ((page.dock && page.dock.enabled) || !page.applyQueued || !page.canApply || !page.system || !page.system.available) return
             if (page.system.pending) return
             page.applyQueued = false
             page.system.apply(page.edge, page.detached, Math.round(page.transparency),
@@ -157,6 +159,7 @@ Item {
 
             Rectangle {
                 id: desktop
+                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true
                 implicitHeight: 114
                 radius: 14; clip: true
@@ -226,6 +229,7 @@ Item {
             }
 
             Rectangle {
+                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 84
                 radius: 13; color: "#12ffffff"
                 ColumnLayout {
@@ -295,7 +299,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
-                visible: implicitHeight > 0
+                visible: implicitHeight > 0 && page.panelStyle !== "dock"
                 clip: true; radius: 13; color: "#12ffffff"
                 Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
                 Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -341,7 +345,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
-                visible: implicitHeight > 0
+                visible: implicitHeight > 0 && page.panelStyle !== "dock"
                 clip: true; radius: 13; color: "#12ffffff"
                 Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
                 Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -378,6 +382,7 @@ Item {
                 }
             }
             Rectangle {
+                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 83
                 radius: 13; color: "#12ffffff"
                 ColumnLayout {
@@ -416,6 +421,7 @@ Item {
                 }
             }
             Rectangle {
+                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 64
                 radius: 13; color: "#12ffffff"
                 RowLayout {
@@ -440,12 +446,17 @@ Item {
                 }
             }
             Choice {
+                Layout.fillWidth:true; text:"Настройки Dock"; visible:page.panelStyle === "dock"
+                onClicked:if(page.dock) page.dock.showSettings(true)
+            }
+            Choice {
                 text: "Вернуть исходный вид"
                 Layout.fillWidth: true
                 enabled: page.system && !page.system.pending
                 onClicked: {
                     liveApply.stop()
                     page.applyQueued = false
+                    if (page.dock && page.dock.enabled) page.dock.setEnabled(false)
                     page.system.resetAppearance()
                 }
             }
