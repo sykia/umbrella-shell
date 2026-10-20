@@ -54,4 +54,20 @@ struct EditReport {
     std::uint32_t ancestors{};
     EditAncestor chain[8]{}; // Interactive button first, then immediate visual parents.
 };
+// Separate, versioned read-only diagnostic protocol; legacy edit ABI is intact.
+inline constexpr ULONG_PTR componentInspectProtocol = protocol + 4;
+inline constexpr ULONG_PTR componentSnapshotProtocol = protocol + 5;
+inline constexpr unsigned maxComponentSnapshot = 48;
+struct ComponentSnapshotEntry {
+    wchar_t id[24]{}, type[96]{}, parentType[96]{}, parentName[80]{};
+    double x{}, y{}, width{}, height{};
+    std::uint32_t visible{}, hitTestVisible{};
+};
+struct ComponentSnapshot {
+    std::uint32_t size = sizeof(ComponentSnapshot), version = 1;
+    HRESULT status = E_FAIL;
+    std::uint32_t count{}, visited{};
+    ComponentSnapshotEntry entries[maxComponentSnapshot]{};
+};
+static_assert(sizeof(ComponentSnapshot) < 65536);
 }

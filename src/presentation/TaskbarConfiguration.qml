@@ -39,6 +39,9 @@ Rectangle {
     function loadMonitor() {
         if (!monitor || loadedMonitor === monitor.id) return
         cancelDrag()
+        // A queued drop belongs to the monitor on which it was made. Switching
+        // screens cancels it before the delayed apply can change another panel.
+        autoApply.stop(); queuedConfiguration = null; queuedMonitor = ""
         loadedMonitor = monitor.id
         configuration = currentConfiguration()
         feedback = monitor.primary ? "" : "Перемещение на этом мониторе пока недоступно."
@@ -84,7 +87,7 @@ Rectangle {
         target: editor.system
         function onChanged() {
             if (editor.queuedConfiguration && !editor.system.pending && !editor.applying) autoApply.restart()
-            if (!editor.applying) editor.configuration = editor.currentConfiguration()
+            if (!editor.applying && !editor.dragId) editor.configuration = editor.currentConfiguration()
         }
     }
     function cancelDrag() { dragCancelled = true; dragId = ""; hoverZone = ""; hoverIndex = -1 }
@@ -183,7 +186,8 @@ Rectangle {
                 Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
             }
         }
-        ToolTip.text: chip.movable ? "Task View → Слева, после Виджетов" : "Для этого компонента ещё нет поддержки перемещения."
+        ToolTip.text: chip.movable ? "Task View → Слева, после Виджетов" : LayoutModel.movementBlocker(componentId,
+            !!(editor.monitor && editor.monitor.primary), !!(editor.system && editor.system.componentPlacementAvailable))
         Accessible.name: info.label
         MouseArea {
             id:mouse; anchors.fill:parent; hoverEnabled:true; preventStealing:true

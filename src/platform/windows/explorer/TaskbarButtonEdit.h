@@ -1,6 +1,7 @@
 #pragma once
 #include "TaskbarContextMenu.h"
 #include "TaskbarModuleProtocol.h"
+#include "core/taskbar/Placement.h"
 #include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
@@ -49,7 +50,7 @@ class Session {
         }
     }
     static bool restore(const std::shared_ptr<Control>& c) noexcept {
-        c->editing = false; c->dragging = false;
+        c->editing = false; c->dragging = false; c->live = false;
         try {
             c->inputRoot.ReleasePointerCaptures();
             unmask(c);
@@ -93,16 +94,17 @@ class Session {
     static bool overlaps(const std::shared_ptr<Control>& c) {
         const auto rectangle = c->item.TransformToVisual(c->parent).TransformBounds(
             {0, 0, static_cast<float>(c->item.ActualWidth()), static_cast<float>(c->item.ActualHeight())});
+        const taskbar::Rectangle current{rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height};
+        if (!taskbar::inside(current, c->parent.ActualWidth(), c->parent.ActualHeight())) return true;
         const int count = Media::VisualTreeHelper::GetChildrenCount(c->parent);
-        if (count > 128) return true;
+        if (count < 0 || count > 128) return true;
         for (int i = 0; i < count; ++i) {
             auto other = Media::VisualTreeHelper::GetChild(c->parent, i).try_as<FrameworkElement>();
             if (!other || other == c->item || other.Visibility() != Visibility::Visible ||
                 other.ActualWidth() <= 0 || other.ActualHeight() <= 0) continue;
             const auto r = other.TransformToVisual(c->parent).TransformBounds(
                 {0, 0, static_cast<float>(other.ActualWidth()), static_cast<float>(other.ActualHeight())});
-            if (rectangle.X < r.X + r.Width - 0.5f && rectangle.X + rectangle.Width > r.X + 0.5f &&
-                rectangle.Y < r.Y + r.Height - 0.5f && rectangle.Y + rectangle.Height > r.Y + 0.5f) {
+            if (taskbar::intersects(current, {r.X, r.Y, r.Width, r.Height})) {
                 c->blockerType = winrt::get_class_name(other); c->blockerX = r.X; c->blockerWidth = r.Width;
                 return true;
             }
@@ -282,12 +284,23 @@ public:
     HRESULT position(HWND hwnd, double x) noexcept {
         try {
             if (!std::isfinite(x)) return E_INVALIDARG;
-            if (!control_) { const auto hr = begin(hwnd, false); if (FAILED(hr)) return hr; }
+            // Rebind once on an explicit request after Unloaded/layout invalidation.
+            // No timer or repeated visual-tree scans are needed while dragging.
+            if (!control_ || !valid(control_)) { const auto hr = begin(hwnd, false); if (FAILED(hr)) return hr; }
             auto c = control_;
             if (c->editing || c->dragging || x < 0 || x + c->item.ActualWidth() > c->parent.ActualWidth()) return E_INVALIDARG;
             const double previous = c->offset;
-            if (!place(c, x - baseX(c))) return E_FAIL;
-            if (overlaps(c)) { if (!place(c, previous)) restore(c); return HRESULT_FROM_WIN32(ERROR_BUSY); }
+            const double previousX = baseX(c) + previous;
+            const bool placed = place(c, x - baseX(c));
+            const auto actual = c->item.TransformToVisual(c->parent).TransformBounds(
+                {0, 0, static_cast<float>(c->item.ActualWidth()), static_cast<float>(c->item.ActualHeight())});
+            if (!placed || !valid(c) || !c->item.IsHitTestVisible() ||
+                !taskbar::verified({actual.X, actual.Y, actual.Width, actual.Height}, x,
+                    c->parent.ActualWidth(), c->parent.ActualHeight(), {}) || overlaps(c)) {
+                // A successful property setter is not proof of successful placement.
+                if (!place(c, previous) || std::abs(baseX(c) + c->offset - previousX) > 0.5 || overlaps(c)) restore(c);
+                return HRESULT_FROM_WIN32(ERROR_BUSY);
+            }
             c->committed = c->offset;
             return S_OK;
         } catch (...) { const auto hr = winrt::to_hresult(); reset(); return hr; }
@@ -295,7 +308,7 @@ public:
     HRESULT afterWidgets(HWND hwnd, double gap) noexcept {
         try {
             if (!std::isfinite(gap) || gap < 0 || gap > 96) return E_INVALIDARG;
-            if (!control_) { const auto hr=begin(hwnd,false); if (FAILED(hr)) return hr; }
+            if (!control_ || !valid(control_)) { const auto hr=begin(hwnd,false); if (FAILED(hr)) return hr; }
             auto c=control_;
             if (!valid(c)) return E_ABORT;
             const int count=Media::VisualTreeHelper::GetChildrenCount(c->parent);
@@ -325,6 +338,10 @@ public:
         try {
             auto c = control_ ? control_ : find(hwnd);
             if (!c) { if (SUCCEEDED(status)) r.status = HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED); return r; }
+            if (control_ && (!valid(c) || (c->wrote && !c->dragging && overlaps(c)))) {
+                restore(c);
+                if (SUCCEEDED(r.status)) r.status = HRESULT_FROM_WIN32(ERROR_INVALID_STATE);
+            }
             r.editing = c->editing; r.dragging = c->dragging; r.moves = c->moves; r.clicks = c->clicks; r.focusEvents = c->focusEvents;
             r.hitTestVisible = c->item.IsHitTestVisible();
             if (auto grid = Media::VisualTreeHelper::GetParent(c->parent).try_as<Controls::Panel>()) r.rootBackground = grid.Background() ? 1u : 0u;

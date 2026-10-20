@@ -5,6 +5,7 @@
 #include "TaskbarSmoothClip.h"
 #include "TaskbarPopupPlacement.h"
 #include "TaskbarButtonEdit.h"
+#include "TaskbarComponentSnapshot.h"
 #include <shellapi.h>
 #include <CommCtrl.h>
 #include <array>
@@ -244,6 +245,15 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
     }
     if (message == WM_COPYDATA && reinterpret_cast<HWND>(wparam) == state->owner) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+        if (packet && packet->dwData == componentInspectProtocol && packet->cbData == sizeof(Configuration) && packet->lpData) {
+            const auto& request = *static_cast<const Configuration*>(packet->lpData);
+            if (request.size != sizeof(Configuration) || request.version != 3 || request.enabled) return FALSE;
+            auto snapshot = components::inspect(hwnd);
+            COPYDATASTRUCT reply{componentSnapshotProtocol, sizeof(snapshot), &snapshot};
+            DWORD_PTR received{};
+            return SendMessageTimeoutW(state->owner, WM_COPYDATA, reinterpret_cast<WPARAM>(hwnd),
+                reinterpret_cast<LPARAM>(&reply), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &received) && received && SUCCEEDED(snapshot.status);
+        }
         if (packet && packet->dwData == editProtocol && packet->cbData == sizeof(EditRequest) && packet->lpData) {
             const auto request = *static_cast<const EditRequest*>(packet->lpData);
             if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::AfterWidgets) return FALSE;

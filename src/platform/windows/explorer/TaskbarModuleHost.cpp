@@ -28,6 +28,8 @@ bool layoutActive = false;
 bool editExperiment = false, reportReceived = false;
 bool verifyOwnerDeath = false;
 bool configureTaskview = false, verifyPlacement = false;
+bool inspectComponents = false;
+HWND snapshotWindow{};
 EditReport editReport;
 std::mutex editReportMutex;
 constexpr UINT editMessage = WM_APP + 20;
@@ -81,7 +83,7 @@ bool attach(HWND target) {
         && configure(target, 100, false);
 }
 void restore() {
-    if (editExperiment && attachments.size() == 1 && !SendMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0)) failed = true;
+    if (editExperiment && !inspectComponents && attachments.size() == 1 && !SendMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0)) failed = true;
     layoutActive = false;
     if (popupHook) UnhookWinEvent(popupHook); popupHook = nullptr;
     islands::stop();
@@ -96,6 +98,23 @@ void restore() {
     attachments.clear();
 }
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == WM_COPYDATA && inspectComponents && snapshotWindow && reinterpret_cast<HWND>(wp) == snapshotWindow) {
+        const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
+        if (!packet || packet->dwData != componentSnapshotProtocol || packet->cbData != sizeof(ComponentSnapshot) || !packet->lpData) return FALSE;
+        const auto snapshot = *static_cast<const ComponentSnapshot*>(packet->lpData);
+        if (snapshot.size != sizeof(snapshot) || snapshot.version != 1 || snapshot.count > maxComponentSnapshot || snapshot.visited > 512) return FALSE;
+        std::printf("components status=%08lx count=%u visited=%u\n", static_cast<unsigned long>(snapshot.status), snapshot.count, snapshot.visited);
+        if (SUCCEEDED(snapshot.status)) for (unsigned i = 0; i < snapshot.count; ++i) {
+            auto entry = snapshot.entries[i];
+            if (!entry.id[0]) continue;
+            entry.id[23] = entry.type[95] = entry.parentType[95] = entry.parentName[79] = 0;
+            std::printf("  %ls type=%ls parent=%ls/%ls bounds=(%.1f,%.1f,%.1f,%.1f) visible=%u hit=%u movement=unverified\n",
+                entry.id, entry.type, entry.parentType, entry.parentName, entry.x, entry.y, entry.width, entry.height,
+                entry.visible, entry.hitTestVisible);
+        }
+        reportReceived = true;
+        return TRUE;
+    }
     if (message == monitorMessage) {
         const auto& request = *reinterpret_cast<const MonitorRequest*>(lp);
         for (size_t i = 0; i < attachments.size(); ++i) {
@@ -254,11 +273,12 @@ int wmain(int argc, wchar_t** argv) {
     const bool fixture = argc == 2 && !wcscmp(argv[1], L"--fixture");
     const bool serve = argc == 2 && !wcscmp(argv[1], L"--serve");
     const bool inspect = argc == 2 && !wcscmp(argv[1], L"--inspect-taskview");
+    inspectComponents = argc == 2 && !wcscmp(argv[1], L"--inspect-components");
     configureTaskview = argc == 2 && !wcscmp(argv[1], L"--configure-taskview");
     verifyOwnerDeath = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-owner-death");
     verifyPlacement = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-placement");
     const bool verify = verifyPlacement || verifyOwnerDeath || (argc == 2 && !wcscmp(argv[1], L"--verify-taskview"));
-    editExperiment = configureTaskview || inspect || verify || (argc == 4 && !wcscmp(argv[1], L"--edit-taskview") && !wcscmp(argv[2], L"--seconds"));
+    editExperiment = inspectComponents || configureTaskview || inspect || verify || (argc == 4 && !wcscmp(argv[1], L"--edit-taskview") && !wcscmp(argv[2], L"--seconds"));
     if ((serve || editExperiment) && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
         std::puts("FAILED; another Umbrella taskbar session is active"); return 5;
     }
@@ -270,7 +290,7 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
     unsigned width = fixture ? 75 : serve || editExperiment ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
-    unsigned seconds = verify ? 120 : fixture || serve || inspect || configureTaskview ? 1 : editExperiment ? static_cast<unsigned>(_wtoi(argv[3])) : static_cast<unsigned>(_wtoi(argv[4]));
+    unsigned seconds = verify ? 120 : fixture || serve || inspect || inspectComponents || configureTaskview ? 1 : editExperiment ? static_cast<unsigned>(_wtoi(argv[3])) : static_cast<unsigned>(_wtoi(argv[4]));
     if (width < 40 || width > 100 || seconds < 1 || seconds > 120) return 2;
     std::array<wchar_t, 32768> path{};
     GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
@@ -295,6 +315,10 @@ int wmain(int argc, wchar_t** argv) {
         test = CreateWindowW(testType.lpszClassName, L"Umbrella module geometry test", WS_POPUP,
                              0, 0, GetSystemMetrics(SM_CXSCREEN), 48, nullptr, nullptr, testType.hInstance, nullptr);
         failed = !test || !attach(test);
+    } else if (inspectComponents) {
+        for (const auto window : umbrella::platform::taskbarWindows()) {
+            if (!isExplorer(window) || !attach(window)) { failed = true; break; }
+        }
     } else if (editExperiment) {
         const HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
         RECT rect{}; MONITORINFO monitor{sizeof(monitor)};
@@ -377,7 +401,18 @@ int wmain(int argc, wchar_t** argv) {
         }
     }
     std::fflush(stdout);
-    if (editExperiment && !failed) {
+    if (inspectComponents && !failed) {
+        for (const auto& value : attachments) {
+            snapshotWindow = value.window; reportReceived = false;
+            Configuration request;
+            COPYDATASTRUCT packet{componentInspectProtocol, sizeof(request), &request};
+            DWORD_PTR accepted{};
+            if (!SendMessageTimeoutW(value.window, WM_COPYDATA, reinterpret_cast<WPARAM>(owner),
+                reinterpret_cast<LPARAM>(&packet), SMTO_ABORTIFHUNG, 3000, &accepted) || !accepted || !reportReceived) failed = true;
+        }
+        snapshotWindow = nullptr;
+        restore(); DestroyWindow(owner);
+    } else if (editExperiment && !failed) {
         const bool ok = SendMessageW(owner, editMessage, static_cast<WPARAM>(inspect || configureTaskview || verifyPlacement ? EditAction::Inspect : EditAction::Begin), 0) != 0;
         if (inspect || !ok) {
             restore(); DestroyWindow(owner);
@@ -475,6 +510,6 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(inputThread);
     }
     FreeLibrary(module);
-    std::puts(failed ? "FAILED; restore requested" : editExperiment ? "Passed; taskview reset acknowledged; native session ended" : "Passed; original geometry restored");
+    std::puts(failed ? "FAILED; restore requested" : inspectComponents ? "Passed; read-only component snapshot; native session ended" : editExperiment ? "Passed; taskview reset acknowledged; native session ended" : "Passed; original geometry restored");
     return failed ? 1 : 0;
 }

@@ -384,8 +384,16 @@ bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const 
         // Rejection can close the host. Re-establish the last confirmed layout.
         bool recovered = previous.isEmpty();
         if (!previous.isEmpty()) recovered = placeTaskViewAfterWidgets(previousMonitor, previous.value("gap").toInt());
-        if (!recovered) { activeComponentConfiguration_.clear(); activeComponentMonitor_.clear(); }
-        status_ = QStringLiteral("Не удалось переместить компонент. Проверьте исходный вид панели Windows.");
+        if (!recovered) {
+            activeComponentConfiguration_.clear(); activeComponentMonitor_.clear();
+            // Never replay a record whose native rollback could not be confirmed.
+            // Keep the historical draft and unrelated appearance settings intact.
+            QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+            settings.remove("confirmedComponentV1"); settings.sync();
+            status_ = settings.status() == QSettings::NoError
+                ? QStringLiteral("Перемещение и восстановление прежней позиции не подтверждены. Повторное применение отключено.")
+                : QStringLiteral("Восстановление позиции и удаление записи автоприменения не подтверждены.");
+        } else status_ = QStringLiteral("Не удалось переместить компонент. Прежняя подтверждённая позиция сохранена.");
         emit changed(); return false;
     }
     activeComponentConfiguration_ = configuration;
