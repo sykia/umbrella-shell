@@ -55,6 +55,7 @@ try {
     Invoke-Checked $compiler ($common + $qtIncludes + @('/guard:cf','/I',$destination,"/Fe:$destination/UmbrellaShell.exe",'src/app/main.cpp') + $model + $platform + @("$destination/qrc_settings.cpp") + $link + $libraries + @('/guard:cf','/SUBSYSTEM:WINDOWS','/ENTRY:mainCRTStartup'))
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_policy_tests.exe",'tests/update_policy_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_placement_tests.exe",'tests/taskbar_placement_tests.cpp') + $link)
+    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_reorder_tests.exe",'tests/taskbar_reorder_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_session_tests.exe",'tests/taskbar_session_tests.cpp','src/platform/windows/TaskbarModuleSession.cpp') + $link + $libraries)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_menu_patch_tests.exe",'tests/taskbar_menu_patch_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_settings_lifetime_tests.exe",'tests/settings_window_lifetime_tests.cpp') + $link + @('Qt6Core.lib','Qt6Gui.lib','user32.lib'))

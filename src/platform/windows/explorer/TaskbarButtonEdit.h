@@ -2,6 +2,7 @@
 #include "TaskbarContextMenu.h"
 #include "TaskbarModuleProtocol.h"
 #include "core/taskbar/Placement.h"
+#include "core/taskbar/Reorder.h"
 #include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
@@ -66,6 +67,7 @@ class Session {
     }
     static bool valid(const std::shared_ptr<Control>& c) {
         return c->live && c->item.XamlRoot() && c->item.XamlRoot() == c->parent.XamlRoot() &&
+            (Automation::AutomationProperties::GetAutomationId(c->button) == L"TaskViewButton" || c->button.Name() == L"TaskViewButton") &&
             Media::VisualTreeHelper::GetParent(c->item) == c->parent &&
             c->parent.ActualWidth() > c->item.ActualWidth() &&
             (!c->wrote || c->item.Translation() == c->writtenTranslation);
@@ -91,10 +93,10 @@ class Session {
         ++c->moves;
         return true;
     }
-    static bool overlaps(const std::shared_ptr<Control>& c) {
+    static bool overlaps(const std::shared_ptr<Control>& c, const taskbar::Rectangle* proposed = nullptr) {
         const auto rectangle = c->item.TransformToVisual(c->parent).TransformBounds(
             {0, 0, static_cast<float>(c->item.ActualWidth()), static_cast<float>(c->item.ActualHeight())});
-        const taskbar::Rectangle current{rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height};
+        const taskbar::Rectangle current = proposed ? *proposed : taskbar::Rectangle{rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height};
         if (!taskbar::inside(current, c->parent.ActualWidth(), c->parent.ActualHeight())) return true;
         const int count = Media::VisualTreeHelper::GetChildrenCount(c->parent);
         if (count < 0 || count > 128) return true;
@@ -111,6 +113,18 @@ class Session {
         }
         return false;
     }
+    struct TranslationAdapter {
+        std::shared_ptr<Control> control;
+        bool read(std::uint64_t, taskbar::Rectangle& result) {
+            if (!valid(control)) return false;
+            const auto box = control->item.TransformToVisual(control->parent).TransformBounds(
+                {0, 0, static_cast<float>(control->item.ActualWidth()), static_cast<float>(control->item.ActualHeight())});
+            result = {box.X, box.Y, box.Width, box.Height};
+            return true;
+        }
+        bool write(std::uint64_t, taskbar::Rectangle target) { return place(control, target.x - baseX(control)); }
+        bool accept(std::uint64_t) { return valid(control) && control->item.IsHitTestVisible() && !overlaps(control); }
+    };
     static void finish(const std::shared_ptr<Control>& c, bool commit) {
         c->dragging = false;
         if (!commit || !valid(c) || overlaps(c)) { if (!place(c, c->offsetStart)) restore(c); }
@@ -289,16 +303,15 @@ public:
             if (!control_ || !valid(control_)) { const auto hr = begin(hwnd, false); if (FAILED(hr)) return hr; }
             auto c = control_;
             if (c->editing || c->dragging || x < 0 || x + c->item.ActualWidth() > c->parent.ActualWidth()) return E_INVALIDARG;
-            const double previous = c->offset;
-            const double previousX = baseX(c) + previous;
-            const bool placed = place(c, x - baseX(c));
-            const auto actual = c->item.TransformToVisual(c->parent).TransformBounds(
-                {0, 0, static_cast<float>(c->item.ActualWidth()), static_cast<float>(c->item.ActualHeight())});
-            if (!placed || !valid(c) || !c->item.IsHitTestVisible() ||
-                !taskbar::verified({actual.X, actual.Y, actual.Width, actual.Height}, x,
-                    c->parent.ActualWidth(), c->parent.ActualHeight(), {}) || overlaps(c)) {
-                // A successful property setter is not proof of successful placement.
-                if (!place(c, previous) || std::abs(baseX(c) + c->offset - previousX) > 0.5 || overlaps(c)) restore(c);
+            TranslationAdapter adapter{c};
+            taskbar::Rectangle before;
+            if (!adapter.read(1, before)) return E_ABORT;
+            auto after = before; after.x = x;
+            if (overlaps(c, &after)) return HRESULT_FROM_WIN32(ERROR_BUSY);
+            const std::array moves{taskbar::Move{1, before, after}};
+            const auto result = taskbar::transact(moves, adapter);
+            if (result != taskbar::Transaction::Applied) {
+                if (result == taskbar::Transaction::RollbackFailed || overlaps(c)) restore(c);
                 return HRESULT_FROM_WIN32(ERROR_BUSY);
             }
             c->committed = c->offset;
