@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(UmbrellaShell VERSION 0.1.0 LANGUAGES CXX)
+project(UmbrellaShell VERSION 0.2.0 LANGUAGES CXX)
 
 option(UMBRELLA_BUILD_APP "Build Windows settings window" ON)
 include(CTest)
