@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 
 Rectangle {
     id: root
@@ -7,6 +8,8 @@ Rectangle {
     property bool firstFrameReady: false
     property int phase: 0 // loading, settling, entrance, home
     property bool homeOpen: true
+    property bool taskbarExpanded: false
+    property string taskbarSection: "settings"
     property real brandSweep: 0
     property real homeDock: 0
     readonly property real sidebarWidth: Math.min(220, root.width * 0.28)
@@ -17,7 +20,7 @@ Rectangle {
         && settingsLoader.status === Loader.Ready && logo.status === Image.Ready
     width: 1000
     height: 700
-    color: backdropAvailable ? "transparent" : "#eae7eb"
+    color: backdropAvailable ? "#d9242630" : "#242630"
     focus: true
     Keys.onEscapePressed: root.Window.window.close()
 
@@ -62,6 +65,7 @@ Rectangle {
 
     Rectangle {
         id: taskbarNav
+        objectName: "taskbarNavigation"
         x: 24; y: 96
         width: root.sidebarWidth - 24; height: 40; radius: 12
         visible: root.phase === 3
@@ -73,24 +77,66 @@ Rectangle {
             anchors.centerIn: parent; text: "Taskbar"
             color: "white"; font.family: "Segoe UI"; font.pixelSize: 14
         }
+        Text {
+            anchors.right:parent.right; anchors.rightMargin:18; anchors.verticalCenter:parent.verticalCenter
+            text:"\uE70D"; color:"white"; font.family:"Segoe MDL2 Assets"; font.pixelSize:10
+            rotation:root.taskbarExpanded ? 180 : 0
+            Behavior on rotation { NumberAnimation { duration:180; easing.type:Easing.OutCubic } }
+        }
         MouseArea {
             id: navMouse
             anchors.fill: parent; hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.homeOpen = false
+            onClicked: { root.taskbarExpanded = !root.taskbarExpanded; root.homeOpen = false }
             Accessible.role: Accessible.Button
             Accessible.name: "Taskbar"
-            Accessible.onPressAction: root.homeOpen = false
+            Accessible.onPressAction: { root.taskbarExpanded = !root.taskbarExpanded; root.homeOpen = false }
         }
+    }
+    Column {
+        x:30; y:144; width:root.sidebarWidth - 36; spacing:5
+        height:root.taskbarExpanded ? 81 : 0
+        opacity:root.taskbarExpanded ? 1 : 0
+        visible:root.phase === 3 && height > 0; clip:true
+        Behavior on height { NumberAnimation { duration:180; easing.type:Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration:160 } }
+        Repeater {
+            model:[{key:"settings",label:"Основные настройки"},{key:"configuration",label:"Конфигурация панели"}]
+            Rectangle {
+                required property var modelData
+                objectName:"taskbarNavigation_" + modelData.key
+                width:parent.width; height:38; radius:10
+                color:!root.homeOpen && root.taskbarSection === modelData.key ? "#45e7131b" : subMouse.containsMouse ? "#28ffffff" : "transparent"
+                Behavior on color { ColorAnimation { duration:150 } }
+                Text { anchors.fill:parent; anchors.leftMargin:12; verticalAlignment:Text.AlignVCenter; text:modelData.label; color:"white"; font.family:"Segoe UI"; font.pixelSize:12 }
+                MouseArea {
+                    id:subMouse; anchors.fill:parent; hoverEnabled:true; cursorShape:Qt.PointingHandCursor
+                    onClicked: { root.homeOpen=false; root.taskbarSection=modelData.key }
+                    Accessible.role:Accessible.Button; Accessible.name:modelData.label
+                    Accessible.onPressAction: { root.homeOpen=false; root.taskbarSection=modelData.key }
+                }
+            }
+        }
+    }
+    ScrollView {
+        id: configurationScroll
+        objectName: "configurationPageScroll"
+        x:root.contentLeft + 14; y:28; width:root.width-x-26; height:root.height-54
+        opacity:root.phase === 3 && !root.homeOpen && root.taskbarSection === "configuration" ? 1 : 0
+        visible:opacity > 0; enabled:!root.homeOpen && root.taskbarSection === "configuration"
+        clip:true; contentWidth:availableWidth
+        ScrollBar.horizontal.policy:ScrollBar.AlwaysOff
+        Behavior on opacity { NumberAnimation { duration:200 } }
+        TaskbarConfiguration { width:parent.width; system:taskbarSystem; scrollTarget:configurationScroll.contentItem }
     }
     TaskbarPage {
         id: taskbarPage
         system: taskbarSystem
         x: root.contentLeft + 14; y: 28
         width: root.width - x - 26; height: root.height - 54
-        opacity: root.phase === 3 && !root.homeOpen ? 1 : 0
+        opacity: root.phase === 3 && !root.homeOpen && root.taskbarSection === "settings" ? 1 : 0
         visible: opacity > 0
-        enabled: !root.homeOpen && root.phase === 3
+        enabled: !root.homeOpen && root.phase === 3 && root.taskbarSection === "settings"
         Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     }
 
@@ -167,6 +213,7 @@ Rectangle {
     SequentialAnimation {
         id: startupSpin
         running: root.phase === 0 && root.visible
+                 && root.Window.window !== null && root.Window.window.visible
         NumberAnimation {
             target: logo; property: "rotation"
             from: 0; to: 180; duration: 700

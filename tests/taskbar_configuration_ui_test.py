@@ -16,11 +16,37 @@ class Backend(QObject):
         self.calls = []
         self.reset_ok = True
         self.drafts = {}
+        self.active = {}
+        self.active_monitor = ""
+        self.apply_ok = True
+        self.status_text = ""
+        self.busy = False
     layoutMonitors = Property("QVariantList", lambda self: [
         {"id":"one","label":"Основной","primary":True,"width":2560},
         {"id":"two","label":"Второй","primary":False,"width":2560}], constant=True)
     componentPlacementAvailable = Property(bool, lambda self: True, constant=True)
-    status = Property(str, lambda self: "", constant=True)
+    pending = Property(bool, lambda self: self.busy, notify=changed)
+    activeComponentConfiguration = Property("QVariantMap", lambda self: self.active, notify=changed)
+    activeComponentMonitor = Property(str, lambda self: self.active_monitor, notify=changed)
+    status = Property(str, lambda self: self.status_text, notify=changed)
+    @Slot(str, "QVariantMap", result=bool)
+    def applyComponentConfiguration(self, monitor, configuration):
+        self.calls.append((monitor, configuration["gap"]))
+        if not self.apply_ok: return False
+        self.active = configuration
+        self.active_monitor = monitor
+        self.drafts[monitor] = configuration
+        self.changed.emit()
+        return True
+    @Slot(str, result=bool)
+    def restoreComponentConfiguration(self, monitor):
+        self.calls.append(("reset", monitor))
+        if not self.reset_ok: return False
+        if self.active_monitor == monitor:
+            self.active = {}; self.active_monitor = ""
+        self.drafts.pop(monitor, None)
+        self.changed.emit()
+        return True
     @Slot(str, result="QVariantMap")
     def componentDraft(self, monitor):
         return self.drafts.get(monitor,{})
@@ -41,6 +67,7 @@ def require(value, message):
 def main():
     app = QGuiApplication(["configuration-test", "-platform", "offscreen"])
     QFontDatabase.addApplicationFont("C:/Windows/Fonts/segoeui.ttf")
+    QFontDatabase.addApplicationFont("C:/Windows/Fonts/segmdl2.ttf")
     backend = Backend()
     view = QQuickView()
     view.setColor(QColor("#202329"))
@@ -82,93 +109,99 @@ def main():
         require(root.property("dragId") == "", "capture leaked")
     initial = config()
     require(not backend.calls,"opening must not write Windows")
-    drag("trayapps","right",2)
-    require(config()["right"][2] == "trayapps", "catalog-to-zone insertion failed")
-    drag("taskview","left",0)
-    require(config()["left"] == ["taskview","widgets"],"cross-zone insert before first failed")
-    drag("widgets","center",1)
-    require(config()["center"] == ["start","widgets","search","apps"],"insert between arbitrary items failed")
-    drag("apps","center",0)
-    require(config()["center"] == ["apps","start","widgets","search"],"same-zone upward reorder failed")
-    drag("apps","center",3)
-    require(config()["center"] == ["start","widgets","search","apps"],"same-zone downward reorder failed")
-    drag("taskview","available")
-    require("taskview" in config()["available"] and "taskview" not in config()["left"],"return to catalog failed")
-    # Empty-zone target, using a catalog item now visible at the beginning of the strip.
-    drag("widgets","left",0)
-    require(config()["left"] == ["widgets"],"empty-zone insert failed")
-    edited = config()
-    require(not backend.calls,"editing must only modify the draft")
+    # Unsupported components cannot begin a drag or change the saved state.
     source = center(item("component_start"))
     QTest.mousePress(view,Qt.LeftButton,Qt.NoModifier,source)
-    QTest.mouseMove(view,source+QPoint(35,15)); QTest.qWait(50)
-    QTest.keyClick(view,Qt.Key_Escape); QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,source+QPoint(35,15))
-    require(config() == edited and root.property("dragId") == "", "Escape changed draft or leaked capture")
-    QTest.mousePress(view,Qt.LeftButton,Qt.NoModifier,source)
-    QTest.mouseMove(view,QPoint(-20,10)); QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,QPoint(-20,10))
-    require(config() == edited,"invalid drop changed draft")
+    QTest.mouseMove(view,source+QPoint(40,20)); QTest.qWait(40)
+    require(not root.property("dragId"), "unsupported component began dragging")
+    QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,source+QPoint(40,20))
+    require(config() == initial and not backend.calls and not backend.drafts, "unsupported move wrote state")
+    drag("taskview","left",0)
+    require(config() == initial and not backend.calls, "unsupported Task View position applied")
+    drag("taskview","left",1)
+    require(backend.calls == [("one",8)], "drop did not automatically apply exactly once")
+    require(config()["left"] == ["widgets","taskview"] and backend.drafts["one"] == config(), "confirmed configuration not saved")
+    applied = config()
+    # Coalesce successive gap edits into one command; displayed layout stays confirmed.
+    for gap in (12,16,24):
+        next_config = dict(applied); next_config["gap"] = gap
+        require(root.commit(next_config), "valid gap refused")
+    require(config() == applied, "unconfirmed configuration displayed as applied")
+    QTest.qWait(240)
+    require(backend.calls[-1] == ("one",24) and len(backend.calls) == 2, "changes did not coalesce")
+    applied = config()
+    # A busy native owner resumes the queued edit only after completion.
+    backend.busy = True
+    calls_before = len(backend.calls)
+    next_config = dict(applied); next_config["gap"] = 28
+    root.commit(next_config); QTest.qWait(230)
+    require(len(backend.calls) == calls_before, "request sent while native owner busy")
+    backend.busy = False; backend.changed.emit(); QTest.qWait(230)
+    require(len(backend.calls) == calls_before+1 and config()["gap"] == 28, "queued edit did not resume")
+    applied = config()
+    backend.apply_ok = False
+    next_config = dict(applied); next_config["gap"] = 32
+    root.commit(next_config); QTest.qWait(230)
+    require(config() == applied and backend.drafts["one"] == applied, "failed operation saved/displayed")
+    backend.apply_ok = True
     root.setProperty("monitorIndex",1); QTest.qWait(100)
-    require(config() != edited and "overflow" in config()["available"],"secondary defaults were not independent")
-    require(not root.property("nativeAvailable"),"secondary must not claim native support")
-    drag("start","right",0)
+    require(not root.property("nativeAvailable"),"secondary advertised native support")
+    require(not root.moveComponent("taskview","left",1),"secondary move accepted")
     root.resetLayout()
-    require(not backend.calls,"secondary reset must not reset the primary native session")
+    require(backend.active == applied and backend.drafts["one"] == applied,"secondary reset affected primary")
     root.setProperty("monitorIndex",0); QTest.qWait(100)
-    require(config() == edited,"monitor switch lost primary draft")
-    require(not root.moveComponent("unknown","left",0),"unknown ID accepted")
-    require(not root.moveComponent("start","bad",0),"invalid zone accepted")
-    require(not root.moveComponent("start","left",999),"invalid index accepted")
+    require(config() == applied,"switch lost confirmed primary configuration")
     backend.reset_ok = False
-    root.resetLayout(); require(config() == edited,"failed native reset discarded draft")
+    root.resetLayout()
+    require(config() == applied and backend.drafts["one"] == applied,"failed reset lost state")
     backend.reset_ok = True
     root.resetLayout(); QTest.qWait(150)
-    require(config() == initial,"reset did not restore catalog baseline")
-    backend.calls.clear()
-    drag("taskview","left",1)
-    require(root.property("applyScenario") == "after-widgets","supported scenario not exposed")
-    QTest.mouseClick(view,Qt.LeftButton,Qt.NoModifier,center(item("configurationApply"))); QTest.qWait(50)
-    require(backend.calls == [("one",8)],"explicit Apply did not reach the monitor-specific adapter")
-    drag("taskview","right",0)
-    require(root.property("applyScenario") == "unsupported" and not item("configurationApply").isEnabled(),"unsupported scenario advertised as applicable")
-    root.resetLayout(); QTest.qWait(150)
-    QTest.mouseMove(view,QPoint(880,5)); QTest.qWait(150)
+    require(config() == initial and "one" not in backend.drafts,"restore did not clear selected saved configuration")
+    # Escape and outside drop must leave native state untouched.
+    before_calls = list(backend.calls)
+    source = center(item("component_taskview"))
+    QTest.mousePress(view,Qt.LeftButton,Qt.NoModifier,source)
+    QTest.mouseMove(view,source+QPoint(35,15)); QTest.qWait(50)
+    QTest.keyClick(view,Qt.Key_Escape)
+    QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,source+QPoint(35,15))
+    require(config() == initial and backend.calls == before_calls and not root.property("dragId"),"Escape applied a change or leaked capture")
+    QTest.mouseMove(view,QPoint(880,5)); QTest.qWait(250)
     require(not warnings,"QML warnings: " + str(warnings))
     view.grabWindow().save(str(Path(__file__).resolve().parents[1]/"tmp/taskbar-configuration.png"))
     view.close()
-    # The real settings page is scrollable at its minimum height: a captured drag
-    # must scroll to a zone's final insertion slot without leaving the editor.
-    from taskbar_live_ui_test import Model
-    full_backend = Model()
-    full_view = QQuickView()
-    full_view.engine().warnings.connect(lambda ws: warnings.extend(w.toString() for w in ws))
-    full_view.setInitialProperties({"system":full_backend})
-    full_view.setResizeMode(QQuickView.SizeRootObjectToView)
-    full_view.resize(900,560)
-    full_view.setSource(QUrl.fromLocalFile(str(Path(__file__).resolve().parents[1]/"src/presentation/TaskbarPage.qml")))
-    full_view.show(); QTest.qWait(150)
-    root = full_view.rootObject()
-    require(root is not None,"Taskbar page did not load")
+    # Exercise the actual scroll container contract at the minimum window height.
+    harness = Path(__file__).resolve().parents[1]/"tmp/configuration-scroll-test.qml"
+    harness.write_text('''import QtQuick
+import QtQuick.Controls
+import "../src/presentation"
+ScrollView {
+    id: viewport
+    property var system
+    clip: true
+    contentWidth: availableWidth
+    TaskbarConfiguration { width: parent.width; system: viewport.system; scrollTarget: viewport.contentItem }
+}''', encoding="utf-8")
+    view = QQuickView()
+    view.engine().warnings.connect(lambda ws: warnings.extend(w.toString() for w in ws))
+    view.setInitialProperties({"system":backend})
+    view.setResizeMode(QQuickView.SizeRootObjectToView)
+    view.setSource(QUrl.fromLocalFile(str(harness)))
+    require(view.status() == QQuickView.Ready, str(view.errors()))
+    view.resize(700,560); view.show(); QTest.qWait(150)
+    root = view.rootObject()
     editor = item("taskbarConfiguration")
     source = center(item("component_taskview"))
-    require(0 < source.y() < 560,"source is outside the initial viewport")
-    destination = item("configuration_right")
-    QTest.mousePress(full_view,Qt.LeftButton,Qt.NoModifier,source)
-    QTest.mouseMove(full_view,QPoint(round(center(destination).x()),535))
-    reached = False
-    for _ in range(35):
-        QTest.qWait(60)
-        p = destination.mapToScene(destination.boundingRect().bottomRight())
-        if p.y() < 520:
-            target = QPoint(round(center(destination).x()),round(p.y()-8))
-            QTest.mouseMove(full_view,target); QTest.qWait(30)
-            QTest.mouseRelease(full_view,Qt.LeftButton,Qt.NoModifier,target)
-            reached = True; break
-    require(reached,"edge auto-scroll did not reveal the final insertion slot")
-    QTest.qWait(180)
-    require(editor.property("configuration").toVariant()["right"][-1] == "taskview","scrolling lost pointer capture or insertion order")
-    require(not full_backend.calls,"scrolling editor changed Windows settings")
+    calls_before = list(backend.calls)
+    QTest.mousePress(view,Qt.LeftButton,Qt.NoModifier,source)
+    QTest.mouseMove(view,QPoint(100,540)); QTest.qWait(400)
+    flickable = editor.property("scrollTarget")
+    require(editor.property("dragId") == "taskview" and flickable.property("contentY") > 0,
+            "captured drag failed to scroll at the viewport edge")
+    QTest.keyClick(view,Qt.Key_Escape)
+    QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,QPoint(100,540)); QTest.qWait(200)
+    require(not editor.property("dragId") and backend.calls == calls_before,"scroll cancellation wrote native state")
     require(not warnings,"QML warnings: " + str(warnings))
-    full_view.close()
-    print("Passed: actual Qt mouse drags, cross-zone insertion, both reorder directions, empty zone, catalog return, independent monitors, validation, reset refusal; no QML warnings or automatic Windows writes.")
+    view.close()
+    print("Passed: real Qt drag/drop, unsupported drag gating, automatic apply/save, coalescing, failure rollback, two-monitor isolation, selected restore, Escape, minimum-height edge scrolling; no QML warnings.")
 
 if __name__ == "__main__": main()

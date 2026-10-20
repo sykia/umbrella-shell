@@ -8,6 +8,10 @@
 class TaskbarSettings final : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList layoutMonitors READ layoutMonitors NOTIFY changed)
+    Q_PROPERTY(QVariantList appearanceMonitors READ appearanceMonitors NOTIFY changed)
+    Q_PROPERTY(QString selectedAppearanceMonitor READ selectedAppearanceMonitor NOTIFY changed)
+    Q_PROPERTY(QVariantMap activeComponentConfiguration READ activeComponentConfiguration NOTIFY changed)
+    Q_PROPERTY(QString activeComponentMonitor READ activeComponentMonitor NOTIFY changed)
     Q_PROPERTY(bool componentPlacementAvailable READ sidesAvailable CONSTANT)
     Q_PROPERTY(bool available READ available NOTIFY changed)
     Q_PROPERTY(bool widthAvailable READ widthAvailable CONSTANT)
@@ -23,6 +27,11 @@ class TaskbarSettings final : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY changed)
 public:
     explicit TaskbarSettings(QObject* parent = nullptr);
+    bool restoreSavedAppearance(bool freshSession = true);
+    bool savedAppearanceRestored() const { return restored_; }
+    QVariantList appearanceMonitors() const;
+    QString selectedAppearanceMonitor() const { return selectedAppearanceMonitor_; }
+    Q_INVOKABLE void selectAppearanceMonitor(const QString& id);
     bool available() const { return available_; }
     bool widthAvailable() const;
     bool sidesAvailable() const;
@@ -36,6 +45,10 @@ public:
     bool pending() const { return pending_; }
     QString status() const { return status_; }
     QVariantList layoutMonitors() const;
+    QVariantMap activeComponentConfiguration() const { return activeComponentConfiguration_; }
+    QString activeComponentMonitor() const { return activeComponentMonitor_; }
+    Q_INVOKABLE bool applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration);
+    Q_INVOKABLE bool restoreComponentConfiguration(const QString& monitor);
     Q_INVOKABLE QVariantMap componentDraft(const QString& monitor) const;
     Q_INVOKABLE bool saveComponentDraft(const QString& monitor, const QVariantMap& draft);
     Q_INVOKABLE bool placeTaskViewAfterWidgets(const QString& monitor, int gap);
@@ -46,6 +59,10 @@ public:
 signals:
     void changed();
 private:
+    QString selectedAppearanceMonitor_;
+    bool restored_ = false;
+    QVariantMap activeComponentConfiguration_;
+    QString activeComponentMonitor_;
     bool available_ = false, autoHide_ = false, pending_ = false;
     QString status_;
     QString edge_ = "bottom";

@@ -9,6 +9,7 @@
 #include <atomic>
 #include <algorithm>
 #include <vector>
+#include <mutex>
 
 // UIA calls run outside Explorer and outside the host's recovery/message thread.
 // No text, accessible names or application identities are requested or retained.
@@ -18,6 +19,8 @@ inline HANDLE thread{};
 inline DWORD threadId{};
 inline std::atomic_bool enabled{false};
 inline std::vector<HWND> targets;
+inline std::mutex targetsMutex;
+inline void setTargets(const std::vector<HWND>& windows) { const std::lock_guard lock(targetsMutex); targets = windows; }
 inline UINT refreshMessage = WM_APP + 31;
 inline bool pending = false;
 inline HWND ownerWindow{};
@@ -31,7 +34,9 @@ inline void refresh(IUIAutomation* automation) {
     ComPtr<IUIAutomationTreeWalker> walker;
     if (FAILED(automation->get_ControlViewWalker(&walker))) return;
     bool complete = true;
-    for (HWND window : targets) {
+    std::vector<HWND> current;
+    { const std::lock_guard lock(targetsMutex); current = targets; }
+    for (HWND window : current) {
         IslandMask mask;
         std::array<RECT, 3> groups{};
         std::array<bool, 3> present{};
@@ -126,7 +131,8 @@ inline void CALLBACK changed(HWINEVENTHOOK, DWORD, HWND window, LONG, LONG, DWOR
     if (!enabled || !window || pending) return;
     HWND root = GetAncestor(window, GA_ROOT);
     bool ours = false;
-    for (HWND target : targets) if (window == target || root == target || IsChild(target, window)) ours = true;
+    { const std::lock_guard lock(targetsMutex);
+      for (HWND target : targets) if (window == target || root == target || IsChild(target, window)) ours = true; }
     if (ours) PostThreadMessageW(threadId, refreshMessage, 0, 0);
 }
 inline DWORD WINAPI run(void*) {
@@ -138,7 +144,7 @@ inline DWORD WINAPI run(void*) {
     CoCreateInstance(__uuidof(CUIAutomation), nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&automation));
     // Scope events to the Explorer process; delivery is on this worker's message loop.
     DWORD pid{};
-    if (!targets.empty()) GetWindowThreadProcessId(targets.front(), &pid);
+    { const std::lock_guard lock(targetsMutex); if (!targets.empty()) GetWindowThreadProcessId(targets.front(), &pid); }
     HWINEVENTHOOK hook = pid ? SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_LOCATIONCHANGE, nullptr,
         changed, pid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS) : nullptr;
     MSG message{};
@@ -158,7 +164,7 @@ inline DWORD WINAPI run(void*) {
     return 0;
 }
 inline bool start(HWND owner, const std::vector<HWND>& windows) {
-    ownerWindow = owner; targets = windows;
+    ownerWindow = owner; setTargets(windows);
     return true;
 }
 inline bool setEnabled(bool value) {

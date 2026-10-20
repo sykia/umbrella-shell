@@ -1,5 +1,6 @@
 #include "TaskbarMenuProtocol.h"
 #include "../SettingsWindowMessages.h"
+#include "../TaskbarWindows.h"
 #include <shellapi.h>
 #include <array>
 #include <cstdio>
@@ -85,7 +86,7 @@ void refresh() {
     KillTimer(owner, retryTimer);
     if (stopping) return;
     bool complete = true;
-    EnumWindows(collect, reinterpret_cast<LPARAM>(&complete));
+    for (const auto panel : umbrella::platform::taskbarWindows()) collect(panel, reinterpret_cast<LPARAM>(&complete));
     if ((!complete || attachments.empty()) && ++attempts < 8) SetTimer(owner, retryTimer, 250, nullptr);
     std::fprintf(stderr, "Menu panels: %zu; compatible=%u\n", attachments.size(), complete ? 1u : 0u);
     std::fflush(stderr);

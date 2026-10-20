@@ -9,11 +9,11 @@ using Value = winrt::Windows::Foundation::IInspectable;
 struct Property { FrameworkElement element{nullptr}; DependencyProperty property{nullptr}; Value original{nullptr}; };
 struct Override { FrameworkElement element{nullptr}; DependencyProperty property{nullptr}; int64_t token{}; };
 struct Control { bool active = true; bool writing = false; };
-// Keep Windows' native frame/button sizes. Expand only the backdrop and center
-// the tray; changing TaskbarFrame.Height feeds back into Explorer's size cache.
+// Feed the cross-axis frame size into Explorer's native size cache so Explorer
+// owns the per-monitor work area. Button sizes remain native.
 class Session {
-    std::array<Property, 6> originals_{};
-    std::array<Override, 5> overrides_{};
+    std::array<Property, 8> originals_{};
+    std::array<Override, 6> overrides_{};
     unsigned originalCount_ = 0, overrideCount_ = 0;
     FrameworkElement frame_{nullptr}, tray_{nullptr}, background_{nullptr};
     std::array<FrameworkElement, 2> strokes_{nullptr, nullptr};
@@ -61,6 +61,7 @@ public:
                 for (int i = 0; i < count && stack.size() < 512; ++i) stack.push_back(Media::VisualTreeHelper::GetChild(node, i));
             }
             if (!tray_ || !background_) { reset(); return false; }
+            remember(frame_, FrameworkElement::WidthProperty()); remember(frame_, FrameworkElement::HeightProperty());
             remember(background_, UIElement::RenderTransformProperty()); remember(background_, UIElement::RenderTransformOriginProperty());
             remember(tray_, FrameworkElement::HorizontalAlignmentProperty()); remember(tray_, FrameworkElement::VerticalAlignmentProperty());
             for (const auto& stroke : strokes_) if (stroke) remember(stroke, UIElement::OpacityProperty());
@@ -105,6 +106,13 @@ public:
         try {
             control_ = std::make_shared<Control>();
             const bool vertical = edge == 0 || edge == 2;
+            // A HWND resize or a backdrop transform alone leaves Explorer's
+            // reserved strip unchanged. Its XAML frame size notification updates
+            // the native reservation (including secondary taskbars). Save both
+            // axes before the first override; suspend restores them before an
+            // edge switch, reset, or owner-death teardown.
+            set(frame_, vertical ? FrameworkElement::WidthProperty() : FrameworkElement::HeightProperty(),
+                winrt::box_value(static_cast<double>(thickness)));
             Media::ScaleTransform scale;
             const auto update = [scale, background = background_, vertical, thickness] {
                 const double original = vertical ? background.ActualWidth() : background.ActualHeight();

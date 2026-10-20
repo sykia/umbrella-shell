@@ -40,6 +40,7 @@ struct State {
     bool enabled = false;
     bool restoring = false;
     bool nativeLayout = false;
+    bool forceGeometry = false;
     unsigned edge = 3;
     unsigned originalEdge = 3;
 };
@@ -322,7 +323,11 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             state->detached = config.detached != 0;
             state->clipSize = {};
             const bool visualsChanged = !state->enabled || edgeChanged || state->thickness != config.thickness;
-            const bool geometryChanged = visualsChanged || state->width != config.widthPercent;
+            APPBARDATA shared{}; shared.cbSize = sizeof(shared);
+            const bool gotSharedEdge = SHAppBarMessage(ABM_GETTASKBARPOS, &shared) != 0;
+            const bool forceGeometry = config.edge == 1 || (FindWindowW(L"Shell_TrayWnd", nullptr) != hwnd && gotSharedEdge && config.edge != shared.uEdge);
+            const bool geometryChanged = visualsChanged || state->width != config.widthPercent || state->forceGeometry != forceGeometry;
+            state->forceGeometry = forceGeometry;
             if (visualsChanged) state->visuals.suspend();
             state->thickness = config.thickness;
             state->edge = config.edge;
@@ -356,7 +361,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         return FALSE;
     }
     if (message == WM_WINDOWPOSCHANGING && state->enabled && !state->restoring &&
-        !((state->edge == 1 || state->edge == 3) && state->width == 100 && state->thickness == 48)) {
+        !(state->edge == 3 && state->width == 100 && state->thickness == 48 && !state->forceGeometry)) {
         const LRESULT result = DefSubclassProc(hwnd, message, wparam, lparam);
         auto* position = reinterpret_cast<WINDOWPOS*>(lparam);
         MONITORINFO monitor{sizeof(monitor)};

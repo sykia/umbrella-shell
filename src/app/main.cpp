@@ -2,6 +2,7 @@
 #include "TaskbarSettings.h"
 #include "SettingsWindowLifetime.h"
 #include "platform/windows/SettingsWindowControl.h"
+#include "platform/windows/TaskbarRuntime.h"
 #include <QQmlContext>
 #include "platform/windows/WindowBackdrop.h"
 #include <QQuickItem>
@@ -18,11 +19,14 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QDir>
+#include <QSettings>
+#include <QFile>
 
 int main(int argc, char* argv[]) {
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
     const bool settings = argc == 2 && QByteArray(argv[1]) == "--settings";
-    if (argc > 1 && !smoke && !settings) {
+    const bool resume = argc == 2 && QByteArray(argv[1]) == "--resume-settings";
+    if (argc > 1 && !smoke && !settings && !resume) {
         QCoreApplication app(argc, argv);
         QCoreApplication::setOrganizationName("UmbrellaShell");
         QCoreApplication::setApplicationName("UmbrellaShell");
@@ -41,20 +45,34 @@ int main(int argc, char* argv[]) {
                 {"shellBarAvailable", false}}).toJson();
             return 0;
         }
+        if (args[1] == "--startup-status") {
+            QFile report(umbrella::platform::TaskbarRuntime::reportPath());
+            if (!report.open(QIODevice::ReadOnly) || report.size() > 65536) return 1;
+            QTextStream(stdout) << report.readAll(); return 0;
+        }
         if (args[1] == "--help" || args[1] == "--version") {
             QTextStream(stdout) << "Umbrella Shell " << UMBRELLA_VERSION
-                << "\n--settings --diagnostics --ui-smoke --restore-taskbar-style\n";
+                << "\n--settings --resume-settings --startup-status --diagnostics --ui-smoke --restore-taskbar-style\n";
             return 0;
         }
         return 2;
     }
-    if (!smoke && umbrella::platform::activateExistingSettingsWindow()) return 0;
+    if (!smoke && umbrella::platform::activateExistingSettingsWindow(!resume)) return 0;
     qputenv("QT_QUICK_CONTROLS_STYLE", "Basic");
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Direct3D11);
     QGuiApplication app(argc, argv);
     app.setOrganizationName("UmbrellaShell");
     app.setApplicationName("UmbrellaShell");
     app.setApplicationVersion(UMBRELLA_VERSION);
+    umbrella::platform::TaskbarRuntime runtime;
+    if (!smoke && !runtime.ownsInstance()) {
+        umbrella::platform::activateExistingSettingsWindow(!resume);
+        return 0;
+    }
+    if (resume) {
+        QSettings saved(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+        if (!saved.value("resumeAppearance", saved.contains("edge")).toBool()) return 0;
+    }
     app.setWindowIcon(QIcon(":/assets/umbrella.png"));
     TaskbarSettings taskbarSettings;
     QQuickView view;
@@ -90,7 +108,23 @@ int main(int argc, char* argv[]) {
     const bool backdrop = umbrella::platform::applyWindowBackdrop(view);
     view.rootObject()->setProperty("backdropAvailable", backdrop);
     if (!backdrop) QTextStream(stderr) << "System blur unavailable; using opaque fallback.\n";
-    view.show();
+    if (!resume) view.show();
+    bool restorationAttempted = false, restorationSucceeded = false;
+    if (!smoke) QObject::connect(&taskbarSettings, &TaskbarSettings::changed, &app, [&] {
+        if (restorationAttempted && !taskbarSettings.pending())
+            umbrella::platform::TaskbarRuntime::writeRestoreReport(taskbarSettings.savedAppearanceRestored(), taskbarSettings.status());
+    });
+    if (!smoke) umbrella::platform::TaskbarRuntime::writeRestoreReport(false, QStringLiteral("Ожидание Explorer, панелей и мониторов."));
+    if (!smoke && !runtime.start([&] {
+        restorationAttempted = true;
+        const bool handled = taskbarSettings.restoreSavedAppearance();
+        restorationSucceeded = taskbarSettings.savedAppearanceRestored();
+        umbrella::platform::TaskbarRuntime::writeRestoreReport(restorationSucceeded, taskbarSettings.status());
+        return handled;
+    })) {
+        QTextStream(stderr) << "Explorer lifecycle hooks unavailable.\n";
+        return 1;
+    }
     if (smoke) {
         QTimer::singleShot(4200, &app, [&] {
             bool saved = true;

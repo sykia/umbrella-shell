@@ -3,7 +3,7 @@
 class QGuiApplication;
 class QWindow;
 namespace umbrella::platform {
-bool activateExistingSettingsWindow();
+bool activateExistingSettingsWindow(bool show = true);
 class SettingsWindowControl final : public QAbstractNativeEventFilter {
     QGuiApplication& app_;
     QWindow& window_;

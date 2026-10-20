@@ -57,6 +57,15 @@ Item {
         target: page.system
         function onChanged() {
             if (page.applyQueued && !page.system.pending) liveApply.restart()
+            if (!page.applyQueued && !page.system.pending) {
+                page.edge = page.system.edge
+                page.detached = page.system.detached
+                page.transparency = page.system.transparency
+                page.thickness = page.system.thickness
+                page.islands = page.system.islands
+                page.widthPercent = page.system.widthPercent
+                page.autoHide = page.system.autoHide
+            }
         }
     }
 
@@ -119,13 +128,29 @@ Item {
             width: parent.width
             spacing: 12
             Caption { text: "Taskbar"; font.pixelSize: 24; font.weight: Font.DemiBold }
+            ComboBox {
+                objectName: "appearanceMonitor"
+                Layout.fillWidth: true
+                model: page.system && page.system.appearanceMonitors ? page.system.appearanceMonitors : []
+                textRole: "label"
+                valueRole: "id"
+                enabled: !page.applyQueued && !(page.system && page.system.pending)
+                currentIndex: page.system ? indexOfValue(page.system.selectedAppearanceMonitor) : -1
+                onActivated: page.system.selectAppearanceMonitor(currentValue)
+            }
+            Caption {
+                text: "Оформление — для выбранного экрана. Автоскрытие — общее для Windows."
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                opacity: 0.65
+            }
             Caption {
                 text: "Панель задач"
                 opacity: 0.65; font.pixelSize: 11
                 Layout.topMargin: -8
             }
 
-            TaskbarConfiguration { Layout.fillWidth: true; system: page.system; scrollTarget: pageScroll.contentItem }
 
             Rectangle {
                 id: desktop

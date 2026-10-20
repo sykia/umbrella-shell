@@ -1,5 +1,6 @@
 #include "TaskbarAppearance.h"
 #include "TaskbarModuleSession.h"
+#include "TaskbarWindows.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include <shellapi.h>
 #include <array>
 #include <vector>
+#include <algorithm>
 
 namespace umbrella::platform {
 namespace {
@@ -75,6 +77,7 @@ struct Snapshot {
     QByteArray region;
     RECT lastRect{}; bool regionApplied = false;
     int lastGap = -1;
+    bool detached = false, islands = false;
 };
 bool valid(const Snapshot& s) {
     DWORD pid{};
@@ -209,8 +212,8 @@ struct TaskbarAppearance::Impl {
     bool detached{}, islands{}, refreshQueued{};
     inline static Impl* active{};
     void updateRegions() {
-        if (islands) return;
         for (auto& snapshot : snapshots) {
+            if (snapshot.islands) continue;
             if (!valid(snapshot)) continue;
             RECT rect{};
             if (!GetWindowRect(snapshot.hwnd, &rect)) continue;
@@ -221,7 +224,7 @@ struct TaskbarAppearance::Impl {
             const bool fullyVisible = GetMonitorInfoW(MonitorFromWindow(snapshot.hwnd, MONITOR_DEFAULTTONEAREST), &monitor)
                 && rect.left >= monitor.rcMonitor.left && rect.top >= monitor.rcMonitor.top
                 && rect.right <= monitor.rcMonitor.right && rect.bottom <= monitor.rcMonitor.bottom;
-            const int gap = detached && fullyVisible && width > 2 * inset && height > 2 * inset ? inset : 0;
+            const int gap = snapshot.detached && fullyVisible && width > 2 * inset && height > 2 * inset ? inset : 0;
             if (snapshot.regionApplied && snapshot.lastGap == gap &&
                 snapshot.lastRect.right - snapshot.lastRect.left == width &&
                 snapshot.lastRect.bottom - snapshot.lastRect.top == height) continue;
@@ -284,12 +287,7 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
         d.originalEdge = currentEdge();
     }
     if (d.originalEdge < 0) { error = QStringLiteral("Панель Windows недоступна."); return false; }
-    std::vector<HWND> windows;
-    EnumWindows([](HWND hwnd, LPARAM context) -> BOOL {
-        auto& list = *reinterpret_cast<std::vector<HWND>*>(context);
-        if (taskbar(hwnd)) list.push_back(hwnd);
-        return list.size() <= maxWindows;
-    }, reinterpret_cast<LPARAM>(&windows));
+    const auto windows = taskbarWindows();
     if (windows.empty() || windows.size() > maxWindows) {
         error = QStringLiteral("Недопустимое количество системных панелей."); return false;
     }
@@ -360,6 +358,7 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
         for (auto& snapshot : d.snapshots) snapshot.regionApplied = false;
     d.detached = detached;
     d.islands = islands;
+    for (auto& snapshot : d.snapshots) { snapshot.detached = detached; snapshot.islands = islands; }
     d.updateRegions();
     for (const auto& snapshot : d.snapshots)
         if (!islands && valid(snapshot) && !snapshot.regionApplied) error = QStringLiteral("Windows отклонила форму панели.");
@@ -372,9 +371,30 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
     if (!error.isEmpty()) { QString ignored; restore(ignored); return false; }
     return true;
 }
+bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
+    auto& d = *impl_;
+    if (transparency < 0 || transparency > 100 || thickness < (islands ? 64 : 48) || thickness > 96) {
+        error = QStringLiteral("Invalid monitor configuration."); return false;
+    }
+    for (auto& snapshot : d.snapshots) {
+        if (!valid(snapshot)) continue;
+        MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfoW(MonitorFromWindow(snapshot.hwnd, MONITOR_DEFAULTTONULL), &monitor) || device != QString::fromWCharArray(monitor.szDevice)) continue;
+        if (!d.module.apply(detached ? widthPercent : 100, edge, thickness, islands, detached, error, device)) return false;
+        if (!SetLayeredWindowAttributes(snapshot.hwnd, 0, static_cast<BYTE>((255 * (100 - transparency) + 50) / 100), LWA_ALPHA)) {
+            error = QStringLiteral("Windows rejected monitor transparency."); return false;
+        }
+        snapshot.detached = detached; snapshot.islands = islands; snapshot.regionApplied = false;
+        d.updateRegions();
+        return islands || snapshot.regionApplied;
+    }
+    error = QStringLiteral("Monitor taskbar unavailable."); return false;
+}
 bool TaskbarAppearance::restore(QString& error) {
     auto& d = *impl_;
-    if (!d.module.stop(error)) return false;
+    const bool alive = std::any_of(d.snapshots.begin(), d.snapshots.end(), [](const Snapshot& value) { return valid(value); });
+    if (!d.module.stop(error) && alive) return false;
+    error.clear();
     if (d.snapshots.empty()) return true;
     d.unhook();
     if (!restoreLocationSetting(d.originalLocation) || !restoreSnapshots(d.snapshots, d.originalEdge)) {

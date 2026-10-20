@@ -10,44 +10,84 @@ Rectangle {
     property real sceneX:0
     property real sceneY:0
     property var system
-    property var monitors: system && system.layoutMonitors !== undefined ? system.layoutMonitors : [{id:"primary", label:"Основной монитор", primary:true, width:2560}, {id:"secondary", label:"Второй монитор (модель)", primary:false, width:2560}]
+    property var monitors: system && system.layoutMonitors !== undefined ? system.layoutMonitors : []
     property int monitorIndex: 0
     readonly property var monitor: monitors.length ? monitors[Math.min(monitorIndex, monitors.length - 1)] : null
-    property var configurations: ({})
     property var configuration: LayoutModel.defaults(true)
+    property var queuedConfiguration: null
+    property string queuedMonitor: ""
+    property string loadedMonitor: ""
+    property bool applying: false
+    property bool dragCancelled: false
     property string dragId: ""
     property string hoverZone: ""
     property int hoverIndex: -1
+    readonly property bool validDrop: dragId !== "" && hoverZone !== "" && supported(LayoutModel.move(configuration, dragId, hoverZone, hoverIndex))
     property real pointerX: 0
     property real pointerY: 0
-    property string feedback: "Черновик. Перестановки здесь не применяются к Windows автоматически."
+    property string feedback: ""
     readonly property bool nativeAvailable: !!(system && system.componentPlacementAvailable && monitor && monitor.primary)
     readonly property string applyScenario: LayoutModel.taskViewPlacement(configuration)
     readonly property color accent: "#e7131b"
     implicitHeight: body.implicitHeight + 24
-    radius: 13; color: "#12ffffff"
+    radius: 16; color: "#12ffffff"
+    function currentConfiguration() {
+        var live = system && system.activeComponentMonitor === (monitor ? monitor.id : "")
+            ? LayoutModel.clone(system.activeComponentConfiguration) : null
+        return LayoutModel.valid(live) ? live : LayoutModel.defaults(monitor ? monitor.primary : true)
+    }
     function loadMonitor() {
+        if (!monitor || loadedMonitor === monitor.id) return
         cancelDrag()
-        if (!monitor) return
-        var saved = configurations[monitor.id]
-        if (!saved && system && system.componentDraft) saved = system.componentDraft(monitor.id)
-        if (saved) saved = LayoutModel.clone(saved) // Normalize QVariantList sequences into JS arrays.
-        configuration = LayoutModel.valid(saved) ? saved : LayoutModel.defaults(monitor.primary)
-        feedback = "Черновик выбранного монитора загружен. Открытие не применяет его к Windows."
+        loadedMonitor = monitor.id
+        configuration = currentConfiguration()
+        feedback = monitor.primary ? "" : "Перемещение на этом мониторе пока недоступно."
     }
     Component.onCompleted: loadMonitor()
     onMonitorChanged: loadMonitor()
+    function supported(next) {
+        if (!nativeAvailable || !LayoutModel.valid(next)) return false
+        var expected = LayoutModel.move(LayoutModel.defaults(true), "taskview", "left", 1)
+        return ["available", "left", "center", "right"].every(z => JSON.stringify(next[z]) === JSON.stringify(expected[z]))
+    }
     function commit(next) {
-        if (!LayoutModel.valid(next) || !monitor) return false
-        configuration = next
-        var all = Object.assign({}, configurations)
-        all[monitor.id] = next; configurations = all
-        var saved = !system || !system.saveComponentDraft || system.saveComponentDraft(monitor.id,next)
-        feedback = saved ? "Черновик этого монитора сохранён. Windows не изменена; примените Task View отдельно." : "Черновик изменён только в этом сеансе: сохранить его не удалось."
+        next = LayoutModel.clone(next)
+        if (!supported(next) || !monitor || applying) {
+            feedback = "Доступно перемещение Task View после Виджетов слева."
+            return false
+        }
+        queuedConfiguration = next
+        queuedMonitor = monitor.id
+        feedback = ""
+        autoApply.restart()
         return true
     }
-    function moveComponent(id, zone, index) { return commit(LayoutModel.move(configuration, id, zone, index)) }
-    function cancelDrag() { dragId = ""; hoverZone = ""; hoverIndex = -1 }
+    function moveComponent(id, zone, index) {
+        if (id !== "taskview") return false
+        return commit(LayoutModel.move(configuration, id, zone, index))
+    }
+    Timer {
+        id: autoApply; interval: 180; repeat: false
+        onTriggered: {
+            if (!editor.queuedConfiguration) return
+            if (editor.system.pending) return
+            var next = editor.queuedConfiguration, target = editor.queuedMonitor
+            editor.queuedConfiguration = null
+            editor.applying = true
+            var ok = editor.system.applyComponentConfiguration(target, next)
+            editor.applying = false
+            editor.configuration = editor.currentConfiguration()
+            editor.feedback = ok ? (editor.system.status || "") : "Windows не подтвердила перемещение. Проверьте панель задач."
+        }
+    }
+    Connections {
+        target: editor.system
+        function onChanged() {
+            if (editor.queuedConfiguration && !editor.system.pending && !editor.applying) autoApply.restart()
+            if (!editor.applying) editor.configuration = editor.currentConfiguration()
+        }
+    }
+    function cancelDrag() { dragCancelled = true; dragId = ""; hoverZone = ""; hoverIndex = -1 }
     function updatePointer(x, y) {
         var scene = editor.mapToItem(null,x,y); sceneX=scene.x; sceneY=scene.y
         pointerX = x; pointerY = y; hoverZone = ""; hoverIndex = -1
@@ -69,13 +109,21 @@ Rectangle {
     function finishDrag() {
         var id = dragId, zone = hoverZone, index = hoverIndex
         cancelDrag()
-        if (id && zone) moveComponent(id, zone, index)
+        if (id && zone) {
+            var next = LayoutModel.move(configuration, id, zone, index)
+            if (supported(next)) commit(next)
+            else feedback = "Доступно перемещение Task View после Виджетов слева."
+        }
     }
     function resetLayout() {
         cancelDrag()
-        if (monitor && monitor.primary && system && system.resetComponentLayout && !system.resetComponentLayout()) { feedback = "Восстановление Windows не подтверждено. Черновик сохранён."; return }
-        if (monitor) commit(LayoutModel.defaults(monitor.primary))
-        feedback = monitor && monitor.primary ? "Черновик сброшен к базовому расположению каталога. Смещение Task View снято." : "Черновик дополнительного монитора сброшен. Основная панель и её черновик не изменены."
+        autoApply.stop(); queuedConfiguration = null
+        if (!monitor || !system) return
+        applying = true
+        var ok = system.restoreComponentConfiguration(monitor.id)
+        applying = false
+        configuration = currentConfiguration()
+        feedback = ok ? "" : (system.status || "Не удалось подтвердить восстановление. Повторите попытку.")
     }
     Timer {
         interval:40; repeat:true; running:editor.dragId !== "" && !!editor.scrollTarget
@@ -106,27 +154,44 @@ Rectangle {
         property bool inCatalog: false
         readonly property bool knownHere: !!(info.seen && editor.monitor && (editor.monitor.primary || info.secondary))
         objectName: "component_" + componentId
-        height: 52; radius:9
+        readonly property bool movable: componentId === "taskview" && editor.nativeAvailable && !editor.applying
+        height: 52; radius:10
         color: mouse.pressed ? "#40ffffff" : mouse.containsMouse ? "#28ffffff" : "#15ffffff"
         border.width: 1; border.color: "#20ffffff"
         opacity: editor.dragId === componentId ? 0 : 1
         Behavior on color { ColorAnimation { duration:120 } }
         Column {
-            anchors.left:parent.left; anchors.right:parent.right; anchors.margins:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
+            anchors.left:parent.left; anchors.leftMargin:36; anchors.right:parent.right; anchors.rightMargin:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
             Label { width:parent.width; text:chip.info.label; font.pixelSize:11; maximumLineCount:1; elide:Text.ElideRight }
             Label { width:parent.width; font.pixelSize:9; opacity:0.6
-                text: chip.info.native ? (editor.nativeAvailable ? "Task View · применение отдельно" : "Task View · нужна совместимость") : (chip.knownHere ? "Пока не поддерживается" : "Не обнаружен здесь · не поддерживается")
+                text: chip.movable ? "После Виджетов слева" : ""
+                visible:chip.movable
             }
         }
         ToolTip.visible: mouse.containsMouse && !mouse.pressed
-        ToolTip.text: info.label + "\n" + (chip.knownHere ? "Обнаружен на этом мониторе в каталоге исследования" : "На этом мониторе не обнаружен; наличие не подтверждено") + "\n" + (info.native ? "Перенос внутри исходного контейнера; логический порядок не меняется" : "Применение к Windows пока не поддерживается")
+        Text {
+            x:10; anchors.verticalCenter:parent.verticalCenter
+            visible:chip.componentId !== "start"
+            font.family:"Segoe MDL2 Assets"; font.pixelSize:18; color:"white"; opacity:chip.movable ? 1 : 0.45
+            text: ({widgets:"\uE80A",start:"\uE782",search:"\uE721",taskview:"\uE7C4",apps:"\uE71D",clock:"\uE787",volume:"\uE767",network:"\uE701",input:"\uE8D2"})[chip.componentId] || "\uE713"
+        }
+        Item {
+            x:10; width:18; height:18; anchors.verticalCenter:parent.verticalCenter
+            visible:chip.componentId === "start"; opacity:0.45
+            Repeater {
+                model:4
+                Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
+            }
+        }
+        ToolTip.text: chip.movable ? "Task View → Слева, после Виджетов" : "Для этого компонента ещё нет поддержки перемещения."
         Accessible.name: info.label
         MouseArea {
             id:mouse; anchors.fill:parent; hoverEnabled:true; preventStealing:true
+            cursorShape:chip.movable ? Qt.OpenHandCursor : Qt.ArrowCursor
             property real pressX:0; property real pressY:0
-            onPressed: function(e) { var p = mapToItem(editor,e.x,e.y); pressX=p.x; pressY=p.y }
+            onPressed: function(e) { editor.dragCancelled = false; var p = mapToItem(editor,e.x,e.y); pressX=p.x; pressY=p.y }
             onPositionChanged: function(e) {
-                if (!pressed) return
+                if (!pressed || !chip.movable || editor.dragCancelled) return
                 var p = mapToItem(editor,e.x,e.y)
                 if (!editor.dragId && Math.hypot(p.x-pressX,p.y-pressY) > 6) editor.dragId=chip.componentId
                 if (editor.dragId) editor.updatePointer(p.x,p.y)
@@ -139,21 +204,34 @@ Rectangle {
         id:body; anchors.left:parent.left; anchors.right:parent.right; anchors.top:parent.top; anchors.margins:12; spacing:10
         RowLayout {
             Layout.fillWidth:true
-            Label { text:"Конфигурация панели"; font.pixelSize:16; font.weight:Font.DemiBold; Layout.fillWidth:true }
-            ActionButton { text:"Сброс"; objectName:"configurationReset"; onClicked:editor.resetLayout() }
+            Label { text:"Конфигурация панели"; font.pixelSize:22; font.weight:Font.DemiBold; Layout.fillWidth:true }
+            ActionButton { text:"Восстановить"; objectName:"configurationReset"; enabled:!editor.applying && !!editor.monitor; onClicked:editor.resetLayout() }
         }
-        ComboBox {
-            objectName:"configurationMonitor"; Layout.fillWidth:true
-            palette.button:"#30343c"; palette.base:"#30343c"; palette.text:"white"; palette.buttonText:"white"
-            model:editor.monitors; textRole:"label"; currentIndex:editor.monitorIndex
-            onActivated: function(index) { editor.monitorIndex=index }
+        RowLayout {
+            objectName:"configurationMonitor"; Layout.fillWidth:true; spacing:6
+            Repeater {
+                model:editor.monitors
+                ActionButton {
+                    required property var modelData
+                    required property int index
+                    text:"Монитор " + (index + 1)
+                    objectName:"configurationMonitor_" + index
+                    enabled:!editor.applying && !editor.queuedConfiguration
+                    background:Rectangle {
+                        radius:10; color:index === editor.monitorIndex ? editor.accent : "#18ffffff"
+                        Behavior on color { ColorAnimation { duration:160 } }
+                    }
+                    onClicked:editor.monitorIndex=index
+                    ToolTip.visible:hovered; ToolTip.text:modelData.label
+                }
+            }
+            Item { Layout.fillWidth:true }
         }
-        Label { Layout.fillWidth:true; visible:editor.monitor && !editor.monitor.primary; text:"Дополнительный монитор: независимый черновик состава и порядка. Применение к Windows пока не поддерживается."; opacity:0.75; font.pixelSize:11 }
-        Label { text:"Состав для выбранного монитора · перетащите компоненты между каталогом и областями. Черновики мониторов сохраняются отдельно; автоматически не применяются."; opacity:0.7; Layout.fillWidth:true }
+        Label { text:"Компоненты"; opacity:0.65; font.pixelSize:11 }
         Rectangle {
             id:availableArea; objectName:"configurationAvailable"; Layout.fillWidth:true; implicitHeight:84
-            color:editor.hoverZone === "available" ? "#30e7131b" : "#10ffffff"; radius:9
-            border.color:editor.hoverZone === "available" ? editor.accent : "#15ffffff"
+            color:editor.validDrop && editor.hoverZone === "available" ? "#30e7131b" : "#10ffffff"; radius:9
+            border.color:editor.validDrop && editor.hoverZone === "available" ? editor.accent : "#15ffffff"
             Flickable {
                 anchors.fill:parent; anchors.margins:8; clip:true; contentWidth:catalogRow.width; contentHeight:height
                 flickableDirection:Flickable.HorizontalFlick
@@ -180,8 +258,8 @@ Rectangle {
                     objectName:"configuration_" + zoneKey
                     Layout.fillWidth:true; Layout.alignment:Qt.AlignTop
                     implicitHeight:Math.max(160,cards.implicitHeight+54)
-                    radius:10; color:editor.hoverZone === zoneKey ? "#20e7131b" : "#0dffffff"
-                    border.color:editor.hoverZone === zoneKey ? editor.accent : "#20ffffff"
+                    radius:10; color:editor.validDrop && editor.hoverZone === zoneKey ? "#20e7131b" : "#0dffffff"
+                    border.color:editor.validDrop && editor.hoverZone === zoneKey ? editor.accent : "#20ffffff"
                     Label { x:10; y:12; text:zone.modelData.label; font.weight:Font.DemiBold }
                     Column {
                         id:cards; x:8; y:42; width:parent.width-16
@@ -198,50 +276,42 @@ Rectangle {
                                 width:cards.width
                                 Rectangle {
                                     width:parent.width
-                                    height:!slot.source && editor.hoverZone === zone.zoneKey && editor.hoverIndex === slot.insertionIndex ? 58 : 0
+                                    height:!slot.source && editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === slot.insertionIndex ? 58 : 0
                                     color:"transparent"; clip:true
                                     Behavior on height { NumberAnimation { duration:110 } }
                                     Rectangle { anchors.centerIn:parent; width:parent.width; height:3; radius:1; color:editor.accent }
                                 }
                                 Item {
                                     width:parent.width; height:slot.source ? 0 : 58
+                                    Behavior on height { NumberAnimation { duration:110; easing.type:Easing.OutCubic } }
                                     Chip { componentId:slot.modelData; width:parent.width }
                                 }
                             }
                         }
                         Rectangle {
                             width:parent.width
-                            height:editor.hoverZone === zone.zoneKey && editor.hoverIndex === editor.configuration[zone.zoneKey].filter(v => v !== editor.dragId).length ? 58 : 0
+                            height:editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === editor.configuration[zone.zoneKey].filter(v => v !== editor.dragId).length ? 58 : 0
                             color:"transparent"; clip:true
                             Behavior on height { NumberAnimation { duration:110 } }
                             Rectangle { anchors.centerIn:parent; width:parent.width; height:3; radius:1; color:editor.accent }
                         }
-                        Label { visible:editor.configuration[zone.zoneKey].length === 0 && editor.hoverZone !== zone.zoneKey; width:parent.width; text:"Перетащите сюда"; opacity:0.4 }
+                        Label { visible:editor.configuration[zone.zoneKey].length === 0 && editor.hoverZone !== zone.zoneKey; width:parent.width; text:"Нет компонентов"; opacity:0.4 }
                     }
                 }
             }
         }
         RowLayout {
-            Label { text:"Расстояние в черновике"; Layout.fillWidth:true }
-            SpinBox { palette.button:"#30343c"; palette.base:"#30343c"; palette.text:"white"; palette.buttonText:"white"; objectName:"configurationGap"; from:0; to:96; value:editor.configuration.gap; editable:true
-                onValueModified: { var next=LayoutModel.clone(editor.configuration); next.gap=value; editor.commit(next) }
+            Label { text:"Расстояние"; Layout.fillWidth:true }
+            SpinBox { palette.button:"#30343c"; palette.base:"#30343c"; palette.text:"white"; palette.buttonText:"white"; objectName:"configurationGap"; enabled:editor.nativeAvailable && editor.applyScenario === "after-widgets" && !editor.applying; from:0; to:96; value:editor.configuration.gap; editable:true
+                onValueModified: { var next=LayoutModel.clone(editor.queuedConfiguration || editor.configuration); next.gap=value; editor.commit(next) }
             }
             Label { text:"DIP"; opacity:0.6 }
         }
-        Label { Layout.fillWidth:true; text:"Применение: Task View сразу после «Виджетов» слева, основной монитор, исходная нижняя панель 48 DIP / масштаб 100%. Другие позиции пока не поддерживаются. Остальные карточки — черновик; логический порядок и контейнеры Explorer не меняются."; opacity:0.65; font.pixelSize:11 }
-        RowLayout {
-            ActionButton {
-                objectName:"configurationApply"; text:"Применить только Task View"; enabled:editor.nativeAvailable && editor.applyScenario !== "unsupported" && !editor.dragId
-                onClicked: {
-                    var ok = editor.applyScenario === "reset" ? editor.system.resetComponentLayout() : editor.system.placeTaskViewAfterWidgets(editor.monitor.id,editor.configuration.gap)
-                    editor.feedback = ok ? (editor.applyScenario === "reset" ? "Смещение Task View снято. Возврат в каталог не скрывает кнопку Windows." : "Применена только Task View; остальные изменения черновика не применены.") : "Применение не подтверждено. Подробности в статусе Windows ниже."
-                }
-            }
-            ActionButton { text:"Вернуть Task View"; visible:editor.monitor && editor.monitor.primary; onClicked: { if (editor.system && editor.system.resetComponentLayout) editor.system.resetComponentLayout() } }
+        Label {
+            objectName:"configurationFeedback"; Layout.fillWidth:true
+            visible:text.length > 0
+            text:editor.feedback; opacity:0.85; font.pixelSize:11
         }
-        Label { Layout.fillWidth:true; visible:editor.applyScenario === "unsupported"; text:"Эта позиция Task View пока не поддерживается. Проверяемый сценарий: «Виджеты», затем «Представление задач» в области «Слева»."; font.pixelSize:11; opacity:0.7 }
-        Label { objectName:"configurationFeedback"; Layout.fillWidth:true; text:editor.feedback; opacity:0.85; font.pixelSize:11 }
-        Label { Layout.fillWidth:true; visible:!!(editor.system && editor.system.status); text:editor.system ? editor.system.status : ""; opacity:0.7; font.pixelSize:11 }
     }
     Rectangle {
         z:20; visible:editor.dragId !== ""; x:editor.pointerX-80; y:editor.pointerY-24; width:175; height:48; radius:9

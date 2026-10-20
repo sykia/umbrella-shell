@@ -43,14 +43,18 @@ bool TaskbarModuleSession::start(QString& error) {
     error = QStringLiteral("Модуль меню Explorer не подтвердил подключение.");
     return false;
 }
-bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error) {
+bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error, const QString& monitor) {
     if (percent < 40 || percent > 100 || thickness < 48 || thickness > 96) { error = QStringLiteral("Недопустимая ширина панели."); return false; }
     const int location = edge == "left" ? 0 : edge == "top" ? 1 : edge == "right" ? 2 : edge == "bottom" ? 3 : -1;
     if (location < 0) { error = QStringLiteral("Недопустимое расположение панели."); return false; }
     if (host_.state() == QProcess::NotRunning) {
         if (!start(error)) return false;
     }
-    const auto value = QByteArray::number(percent) + ' ' + QByteArray::number(location) + ' ' + QByteArray::number(thickness) + ' ' + QByteArray::number(islands ? 1 : 0) + ' ' + QByteArray::number(detached ? 1 : 0);
+    auto value = QByteArray::number(percent) + ' ' + QByteArray::number(location) + ' ' + QByteArray::number(thickness) + ' ' + QByteArray::number(islands ? 1 : 0) + ' ' + QByteArray::number(detached ? 1 : 0);
+    if (!monitor.isEmpty()) {
+        if (!monitor.startsWith(QStringLiteral("\\\\.\\DISPLAY")) || monitor.size() > 32 || monitor.contains(' ') || monitor.contains('\n')) { error = QStringLiteral("Invalid monitor device."); return false; }
+        value += ' ' + monitor.toLatin1();
+    }
     if (host_.write(value + '\n') != value.size() + 1 || !host_.waitForBytesWritten(3000) || !waitForLine("applied " + value)) {
         QString ignored; stop(ignored);
         error = QStringLiteral("Модуль Explorer не подтвердил ширину панели."); return false;

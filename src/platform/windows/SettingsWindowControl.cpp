@@ -5,7 +5,7 @@
 #include <Windows.h>
 #include <array>
 namespace umbrella::platform {
-bool activateExistingSettingsWindow() {
+bool activateExistingSettingsWindow(bool show) {
     const HWND window = FindWindowW(nullptr, L"Umbrella — Настройки");
     if (!window) return false;
     DWORD pid{};
@@ -19,6 +19,7 @@ bool activateExistingSettingsWindow() {
         !_wcsicmp(ours.data(), theirs.data());
     CloseHandle(process);
     if (!same) return false;
+    if (!show) return true;
     AllowSetForegroundWindow(pid);
     return PostMessageW(window, RegisterWindowMessageW(settings_messages::show), 0, 0) != FALSE;
 }

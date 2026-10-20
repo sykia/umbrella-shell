@@ -1,4 +1,5 @@
 #include "TaskbarModuleProtocol.h"
+#include "../TaskbarWindows.h"
 #include "NativeTaskbarLayout.h"
 #include "TaskbarIslands.h"
 #include "TaskbarPopupPlacement.h"
@@ -13,14 +14,14 @@
 
 namespace {
 using namespace umbrella::explorer;
-struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; };
+struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; };
 std::vector<Attachment> attachments;
 HWND owner{};
 HMODULE module{};
 bool failed = false;
 HANDLE inputThread{};
 unsigned pendingWidth{}, pendingEdge{}, pendingThickness{};
-bool maskPending = false, extendedAck = false, pendingDetached = false;
+bool maskPending = false, extendedAck = false, pendingDetached = false, pendingIslands = false;
 constexpr UINT configureMessage = WM_APP + 19;
 HWINEVENTHOOK popupHook{};
 bool layoutActive = false;
@@ -31,6 +32,9 @@ EditReport editReport;
 std::mutex editReportMutex;
 constexpr UINT editMessage = WM_APP + 20;
 unsigned currentEdge = 3;
+constexpr UINT monitorMessage = WM_APP + 21;
+struct MonitorRequest { unsigned width{}, packed{}; char device[64]{}; };
+char pendingMonitor[64]{};
 void CALLBACK popupChanged(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD);
 bool isExplorer(HWND window) {
     wchar_t name[64]{};
@@ -92,6 +96,20 @@ void restore() {
     attachments.clear();
 }
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if (message == monitorMessage) {
+        const auto& request = *reinterpret_cast<const MonitorRequest*>(lp);
+        for (size_t i = 0; i < attachments.size(); ++i) {
+            MONITORINFOEXW info{}; info.cbSize = sizeof(info);
+            char name[64]{};
+            if (GetMonitorInfoW(MonitorFromWindow(attachments[i].window, MONITOR_DEFAULTTONULL), &info))
+                WideCharToMultiByte(CP_UTF8, 0, info.szDevice, -1, name, 64, nullptr, nullptr);
+            if (!std::strcmp(name, request.device)) {
+                strcpy_s(pendingMonitor, request.device);
+                return ownerProcedure(window, configureMessage, request.width, request.packed | ((i + 1) << 16));
+            }
+        }
+        std::puts("error monitor-unavailable"); std::fflush(stdout); return 0;
+    }
     if (message == WM_COPYDATA && editExperiment && attachments.size() == 1 &&
         reinterpret_cast<HWND>(wp) == attachments.front().window) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
@@ -137,14 +155,24 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         const auto thickness = (packed >> 2) & 127u;
         const bool islandsMode = (packed & (1u << 9)) != 0;
         const bool detached = (packed & (1u << 10)) != 0;
+        const auto target = packed >> 16;
+        if (!target) pendingMonitor[0] = 0;
         extendedAck = (packed & (1u << 11)) != 0;
         pendingDetached = detached;
+        pendingIslands = islandsMode;
         bool ok = width >= 40 && width <= 100 && edge <= 3 && thickness >= 48 && thickness <= 96;
-        if (ok) for (const auto& value : attachments) {
+        if (ok) for (size_t i = 0; i < attachments.size(); ++i) {
+            const auto& value = attachments[i];
+            if (target && target != i + 1) continue;
             DWORD_PTR suspended{};
             ok = send(value.window, RegisterWindowMessageW(suspendVisualsMessage), protocol, reinterpret_cast<LPARAM>(owner), suspended) && suspended && ok;
         }
-        if (ok) for (const auto& value : attachments) ok = configure(value.window, width, true, edge, thickness, islandsMode, detached) && ok;
+        if (ok) for (size_t i = 0; i < attachments.size(); ++i) {
+            auto& value = attachments[i];
+            if (target && target != i + 1) continue;
+            ok = configure(value.window, width, true, edge, thickness, islandsMode, detached) && ok;
+            if (ok) { value.islands = islandsMode; value.edge = edge; }
+        }
         if (ok) {
             layoutActive = true; currentEdge = edge;
             if (!popupHook && !attachments.empty()) {
@@ -153,8 +181,11 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
                 if (!popupHook) ok = false;
             }
         }
-        ok = islands::setEnabled(ok && islandsMode) && ok;
-        if (ok && islandsMode) {
+        std::vector<HWND> islandWindows;
+        for (const auto& value : attachments) if (value.islands) islandWindows.push_back(value.window);
+        islands::setTargets(islandWindows);
+        ok = islands::setEnabled(ok && !islandWindows.empty()) && ok;
+        if (ok && !islandWindows.empty()) {
             pendingWidth = width; pendingEdge = edge; pendingThickness = thickness; maskPending = true;
             SetTimer(window, 2, 2500, nullptr);
             return 0;
@@ -163,6 +194,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         KillTimer(window, 2);
         std::printf(ok ? "applied %u %u %u %u" : "error %u %u %u %u", width, edge, thickness, islandsMode ? 1u : 0u);
         if (extendedAck) std::printf(" %u", detached ? 1u : 0u);
+        if (pendingMonitor[0]) std::printf(" %s", pendingMonitor);
         std::puts("");
         std::fflush(stdout);
         return 0;
@@ -170,9 +202,10 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
     if (message == islands::maskReady || (message == WM_TIMER && wp == 2)) {
         if (maskPending) {
             KillTimer(window, 2); maskPending = false;
-            std::printf(message == islands::maskReady && wp ? "applied %u %u %u 1" : "error %u %u %u 1",
-                pendingWidth, pendingEdge, pendingThickness);
+            std::printf(message == islands::maskReady && wp ? "applied %u %u %u %u" : "error %u %u %u %u",
+                pendingWidth, pendingEdge, pendingThickness, pendingIslands ? 1u : 0u);
             if (extendedAck) std::printf(" %u", pendingDetached ? 1u : 0u);
+            if (pendingMonitor[0]) std::printf(" %s", pendingMonitor);
             std::puts("");
             std::fflush(stdout);
         }
@@ -199,7 +232,7 @@ void CALLBACK popupChanged(HWINEVENTHOOK, DWORD event, HWND window, LONG object,
         if (MonitorFromRect(&value.before, MONITOR_DEFAULTTONEAREST) != monitor) continue;
         RECT panel{}; MONITORINFO info{sizeof(info)};
         if (!GetWindowRect(value.window, &panel) || !GetMonitorInfoW(monitor, &info)) return;
-        const auto point = popup_placement::position(panel, rectangle, info.rcMonitor, currentEdge,
+        const auto point = popup_placement::position(panel, rectangle, info.rcMonitor, value.edge,
             MulDiv(8, static_cast<int>(GetDpiForWindow(value.window)), 96));
         if (point.x != rectangle.left || point.y != rectangle.top)
             SetWindowPos(window, nullptr, point.x, point.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
@@ -286,7 +319,7 @@ int wmain(int argc, wchar_t** argv) {
                 unclipped ? 1u : 0u, (SHAppBarMessage(ABM_GETSTATE, &bar) & ABS_AUTOHIDE) ? 1u : 0u);
             failed = true;
         } else if (!attach(primary)) { std::puts("FAILED; primary taskbar attach handshake refused"); failed = true; }
-    } else EnumWindows(collect, 0);
+    } else for (const auto window : umbrella::platform::taskbarWindows()) if (!collect(window, 0)) break;
     if (attachments.empty()) failed = true;
     if (!serve && !editExperiment) for (const auto& value : attachments) {
         if (!configure(value.window, width, true)) { failed = true; break; }
@@ -405,9 +438,17 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& value : attachments) windows.push_back(value.window);
         if (!islands::start(owner, windows)) { restore(); return 5; }
         inputThread = CreateThread(nullptr, 0, [](void*) -> DWORD {
-            char line[32]{};
+            char line[192]{};
             while (std::fgets(line, sizeof(line), stdin)) {
                 unsigned width{}, edge{}, thickness = 48, mode = 0, detached = 0; char extra{};
+                MonitorRequest request;
+                const int perMonitor = sscanf_s(line, "%u %u %u %u %u %63s %c", &width, &edge, &thickness, &mode, &detached, request.device, 64u, &extra, 1u);
+                if (perMonitor == 6 && width >= 40 && width <= 100 && edge <= 3 && thickness >= (mode ? 64u : 48u) && thickness <= 96 && mode <= 1 && detached <= 1) {
+                    request.width = width;
+                    request.packed = edge | (thickness << 2) | (mode << 9) | (detached << 10) | (1u << 11);
+                    SendMessageW(owner, monitorMessage, 0, reinterpret_cast<LPARAM>(&request));
+                    continue;
+                }
                 const int parsed = sscanf_s(line, "%u %u %u %u %u %c", &width, &edge, &thickness, &mode, &detached, &extra, 1u);
                 if ((parsed == 2 || parsed == 4 || parsed == 5) && width >= 40 && width <= 100 && edge <= 3 && thickness >= 48 && thickness <= 96 && mode <= 1 && detached <= 1)
                     PostMessageW(owner, configureMessage, static_cast<WPARAM>(width), static_cast<LPARAM>(edge | (thickness << 2) | (mode << 9) | (detached << 10) | (parsed == 5 ? 1u << 11 : 0u)));
