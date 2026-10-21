@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 import "TaskbarLayout.js" as LayoutModel
 
 Rectangle {
@@ -18,6 +19,8 @@ Rectangle {
     property string queuedMonitor: ""
     property string loadedMonitor: ""
     property bool applying: false
+    readonly property bool canSubmit: visible && enabled && (!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
+    onCanSubmitChanged: if (!canSubmit) { cancelDrag(); discardQueuedApply() }
     property bool dragCancelled: false
     property string dragId: ""
     property string hoverZone: ""
@@ -41,7 +44,7 @@ Rectangle {
         cancelDrag()
         // A queued drop belongs to the monitor on which it was made. Switching
         // screens cancels it before the delayed apply can change another panel.
-        autoApply.stop(); queuedConfiguration = null; queuedMonitor = ""
+        discardQueuedApply()
         loadedMonitor = monitor.id
         configuration = currentConfiguration()
         feedback = monitor.primary ? "" : "Перемещение на этом мониторе пока недоступно."
@@ -55,7 +58,7 @@ Rectangle {
     }
     function commit(next) {
         next = LayoutModel.clone(next)
-        if (!supported(next) || !monitor || applying) {
+        if (!canSubmit || !supported(next) || !monitor || applying) {
             feedback = "Доступно перемещение Task View после Виджетов слева."
             return false
         }
@@ -73,9 +76,11 @@ Rectangle {
         id: autoApply; interval: 180; repeat: false
         onTriggered: {
             if (!editor.queuedConfiguration) return
+            if (!editor.canSubmit) { editor.discardQueuedApply(); return }
             if (editor.system.pending) return
             var next = editor.queuedConfiguration, target = editor.queuedMonitor
             editor.queuedConfiguration = null
+            editor.queuedMonitor = ""
             editor.applying = true
             var ok = editor.system.applyComponentConfiguration(target, next)
             editor.applying = false
@@ -89,6 +94,11 @@ Rectangle {
             if (editor.queuedConfiguration && !editor.system.pending && !editor.applying) autoApply.restart()
             if (!editor.applying && !editor.dragId) editor.configuration = editor.currentConfiguration()
         }
+    }
+    function discardQueuedApply() {
+        if (autoApply) autoApply.stop()
+        queuedConfiguration = null
+        queuedMonitor = ""
     }
     function cancelDrag() { dragCancelled = true; dragId = ""; hoverZone = ""; hoverIndex = -1 }
     function updatePointer(x, y) {
@@ -120,7 +130,7 @@ Rectangle {
     }
     function resetLayout() {
         cancelDrag()
-        autoApply.stop(); queuedConfiguration = null
+        discardQueuedApply()
         if (!monitor || !system) return
         applying = true
         var ok = system.restoreComponentConfiguration(monitor.id)
@@ -322,5 +332,5 @@ Rectangle {
         color:"#ef30343c"; border.color:editor.accent
         Label { anchors.fill:parent; anchors.margins:8; text:editor.dragId ? LayoutModel.component(editor.dragId).label : ""; verticalAlignment:Text.AlignVCenter }
     }
-    Shortcut { sequence:"Escape"; enabled:editor.dragId !== ""; onActivated:editor.cancelDrag() }
+    Shortcut { sequence:"Escape"; enabled:editor.canSubmit && (editor.dragId !== "" || !!editor.queuedConfiguration); onActivated: { editor.cancelDrag(); editor.discardQueuedApply() } }
 }

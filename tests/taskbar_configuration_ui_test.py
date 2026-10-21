@@ -139,6 +139,31 @@ def main():
     backend.busy = False; backend.changed.emit(); QTest.qWait(230)
     require(len(backend.calls) == calls_before+1 and config()["gap"] == 28, "queued edit did not resume")
     applied = config()
+    # Leaving the editor must cancel a deferred change before it reaches Windows.
+    backend.busy = True
+    calls_before = len(backend.calls)
+    hidden_config = dict(applied); hidden_config["gap"] = 30
+    require(root.commit(hidden_config), "deferred hidden-page fixture refused")
+    root.setVisible(False)
+    backend.busy = False; backend.changed.emit(); QTest.qWait(230)
+    require(len(backend.calls) == calls_before and config() == applied, "hidden editor applied a deferred native request")
+    root.setVisible(True); QTest.qWait(30)
+    require(not root.property("queuedMonitor"), "hidden editor retained a target monitor")
+    # Escape also cancels a queued request while the native owner is busy.
+    backend.busy = True
+    require(root.commit(hidden_config), "deferred Escape fixture refused")
+    QTest.keyClick(view,Qt.Key_Escape)
+    backend.busy = False; backend.changed.emit(); QTest.qWait(230)
+    require(len(backend.calls) == calls_before and config() == applied, "Escape applied a deferred native request")
+    for suspend, resume in ((lambda: root.setEnabled(False), lambda: root.setEnabled(True)),
+                            (view.hide, view.show), (view.showMinimized, view.showNormal)):
+        require(root.commit(hidden_config), "deferred inactive-editor fixture refused")
+        suspend()
+        require(not root.property("canSubmit") and not root.commit(hidden_config), "inactive editor accepted a native request")
+        QTest.qWait(230)
+        require(len(backend.calls) == calls_before and config() == applied, "inactive editor sent a delayed native request")
+        resume(); QTest.qWait(30)
+        require(not root.property("queuedMonitor"), "inactive editor retained a target monitor")
     backend.apply_ok = False
     next_config = dict(applied); next_config["gap"] = 32
     root.commit(next_config); QTest.qWait(230)
