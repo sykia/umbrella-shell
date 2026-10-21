@@ -5,6 +5,18 @@
 
 ## Подтверждённые результаты
 
+21 октября 2026, локальный этап логического Reorder: полная MSVC/Qt 6.8.3 сборка
+`Build-Local.ps1 -Output build/reorder-model` успешна. Core model-транзакция прошла
+отказы до/после всех шести операций перестановки четырёх объектов, восстановление
+удалённого объекта, native-verification refusal, no-op и защиту reentrant-данных.
+Системный WinUI 2 CBS ItemsRepeater в собственном offscreen HWND прошёл тот же
+native-адаптер: порядок/восстановление, исходные Click через automation Invoke,
+добавление/закрытие элемента и отказ от перезаписи reentrant-вставки. Snapshot
+protocol, placement, session, Dock isolated fixture и host `--fixture` также прошли.
+Core planner: 1000 планов по 64 объекта — 20–24 мс в двух запусках; это не время
+модельной транзакции или drag/drop. Explorer не подключался, его ресурсы/задержки
+не измерялись, дополнительные компоненты настоящей панели не объявлены готовыми.
+
 [CI 0a0dfff](https://github.com/sykia/umbrella-shell/actions/runs/39247191348)
 успешно выполнил Windows MSVC/Qt 6.8.3 сборку, **8/8 CTest**, deployment,
 Inno-компиляцию и smoke с системным PATH. Linux core также прошёл.

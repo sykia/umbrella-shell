@@ -1,4 +1,5 @@
 #include "core/taskbar/Reorder.h"
+#include "core/taskbar/ModelOrder.h"
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -21,6 +22,46 @@ struct Adapter {
     bool accept(std::uint64_t) { return acceptAll; }
 };
 int main() {
+    struct Model {
+        std::vector<int> values{1,2,3,4};
+        unsigned writes=0, failAt=0;
+        bool partial=false, foreign=false, reject=false;
+        bool snapshot(std::vector<int>& out) { out=values; return true; }
+        bool remove(unsigned index) {
+            ++writes;
+            if (writes==failAt && !partial) return false;
+            values.erase(values.begin()+index);
+            if (foreign) { values.push_back(99); return false; }
+            if (writes==failAt) throw std::runtime_error("notification failed after removal");
+            return true;
+        }
+        bool insert(unsigned index,int value) {
+            ++writes;
+            if (writes==failAt && !partial) return false;
+            values.insert(values.begin()+index,value);
+            if (writes==failAt) throw std::runtime_error("notification failed after insertion");
+            return true;
+        }
+        bool verify(const std::vector<int>& order) { return !reject || order==std::vector<int>{1,2,3,4}; }
+    };
+    const std::vector<int> originalOrder{1,2,3,4}, requestedOrder{4,3,2,1};
+    Model model;
+    require(reorderModel(originalOrder,requestedOrder,model)==Transaction::Applied && model.values==requestedOrder,"model order did not apply");
+    model={};
+    require(reorderModel(originalOrder,originalOrder,model)==Transaction::Applied && !model.writes,"model no-op sent notifications");
+    for(unsigned failure=1;failure<=6;++failure) for(bool partial : {false,true}) {
+        model={}; model.failAt=failure; model.partial=partial;
+        require(reorderModel(originalOrder,requestedOrder,model)==Transaction::RolledBack && model.values==originalOrder,"failed model write lost original order/removed object");
+    }
+    model={}; model.reject=true;
+    require(reorderModel(originalOrder,requestedOrder,model)==Transaction::RolledBack && model.values==originalOrder,"native model verification failure committed");
+    model={}; model.values.push_back(5);
+    require(reorderModel(originalOrder,requestedOrder,model)==Transaction::Stale && !model.writes,"dynamic model changed after snapshot was overwritten");
+    model={}; model.foreign=true;
+    require(reorderModel(originalOrder,requestedOrder,model)==Transaction::RollbackFailed && model.writes==1 && model.values.back()==99,"reentrant foreign update overwritten by rollback");
+    model={};
+    require(reorderModel(originalOrder,std::vector<int>{1,2,2,4},model)==Transaction::Invalid && !model.writes,"duplicate model identity accepted");
+    std::cout << "Passed: logical model permutation, no-op, failures before/after all six mutations, rollback of removed objects, stale dynamic models and reentrant update preservation.\n";
     const std::array items{
         MeasuredItem{1, Component::Widgets, {0,0,100,48}, true},
         MeasuredItem{2, Component::Start, {300,0,44,48}, true},

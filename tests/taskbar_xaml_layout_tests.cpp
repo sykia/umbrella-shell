@@ -3,6 +3,7 @@
 #undef GetCurrentTime
 #include "platform/windows/explorer/TaskbarLayoutSlotAdapter.h"
 #include "platform/windows/explorer/TaskbarRepeaterAccess.h"
+#include "platform/windows/explorer/TaskbarRepeaterModel.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Automation.Provider.h>
@@ -48,7 +49,13 @@ void exerciseRepeaterContract() {
     // foreign source merely because its interface happens to be writable.
     auto data=winrt::single_threaded_observable_vector<explorer::repeater::Value>();
     const std::array<Controls::Button,3> originals{};
-    for (const auto& button : originals) { button.Width(44); button.Height(48); data.Append(button); }
+    std::array<unsigned,3> nativeClicks{};
+    for (unsigned i=0;i<originals.size();++i) {
+        const auto& button=originals[i];
+        button.Width(44); button.Height(48);
+        button.Click([&,i](auto&&,auto&&){++nativeClicks[i];});
+        data.Append(button);
+    }
     winrt::com_ptr<::IInspectable> contract;
     winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(instance))->QueryInterface(explorer::repeater::itemsRepeaterId,contract.put_void()));
     auto** table=*reinterpret_cast<void***>(contract.get());
@@ -90,9 +97,49 @@ void exerciseRepeaterContract() {
         }
     };
     verify({0,1,2});
-    const auto third=data.GetAt(2); data.RemoveAt(2); data.InsertAt(0,third); flush();
+    const std::vector<explorer::repeater::Value> before{originals[0],originals[1],originals[2]};
+    const std::vector<explorer::repeater::Value> after{originals[2],originals[0],originals[1]};
+    const auto nativeVerify=[&](const auto& order) {
+        flush();
+        for(unsigned i=0;i<order.size();++i) {
+            explorer::repeater::Value realized{nullptr};
+            winrt::check_hresult(reinterpret_cast<Realize>(table[21])(contract.get(),i,winrt::put_abi(realized)));
+            int actual=-1; winrt::check_hresult(explorer::repeater::elementIndex(instance,realized,actual));
+            if (realized!=order[i] || actual!=static_cast<int>(i)) return false;
+        }
+        return true;
+    };
+    using taskbar::Transaction;
+    require(explorer::repeater::reorderOwnedModel(instance,data,before,after,nativeVerify)==Transaction::Applied,"Native model transaction failed");
     verify({1,2,0});
-    data.RemoveAt(0); data.Append(third); flush(); verify({0,1,2});
+    for (const auto& button : originals) {
+        auto peer=Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(button);
+        peer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();
+    }
+    flush();
+    require(nativeClicks==std::array<unsigned,3>{1,1,1},"Reordered native button lost original Click handler");
+    require(explorer::repeater::reorderOwnedModel(instance,data,after,before,nativeVerify)==Transaction::Applied,"Native model restore failed");
+    verify({0,1,2});
+    require(explorer::repeater::reorderOwnedModel(instance,data,before,after,[&](const auto& order){return order==before && nativeVerify(order);})==Transaction::RolledBack,"Native verification refusal did not rollback");
+    verify({0,1,2});
+    Controls::Button arriving; arriving.Width(44); arriving.Height(48); data.Append(arriving);
+    require(explorer::repeater::reorderOwnedModel(instance,data,before,after,nativeVerify)==Transaction::Stale,"Arriving application ignored stale model");
+    auto expanded=before; expanded.push_back(arriving);
+    auto expandedOrder=expanded; std::rotate(expandedOrder.begin(),expandedOrder.begin()+3,expandedOrder.end());
+    require(explorer::repeater::reorderOwnedModel(instance,data,expanded,expandedOrder,nativeVerify)==Transaction::Applied,"Expanded native model reorder failed");
+    require(explorer::repeater::reorderOwnedModel(instance,data,expandedOrder,expanded,nativeVerify)==Transaction::Applied,"Expanded native model restore failed");
+    data.RemoveAt(3);
+    require(explorer::repeater::reorderOwnedModel(instance,data,expanded,expandedOrder,nativeVerify)==Transaction::Stale,"Closed application ignored stale model");
+    require(nativeVerify(before),"Dynamic model restore lost original identities");
+    bool injected=false;
+    const auto token=data.VectorChanged([&](auto&&,auto&&){if(!injected){injected=true;data.Append(arriving);}});
+    const auto interrupted=explorer::repeater::reorderOwnedModel(instance,data,before,after,nativeVerify);
+    data.VectorChanged(token);
+    require(interrupted==Transaction::RollbackFailed && data.GetAt(data.Size()-1)==arriving,"Reentrant model update was overwritten");
+    // Fixture explicitly owns cleanup; transaction correctly refused to clobber
+    // a changed model, so this is not reported as transactional rollback.
+    data.Clear(); for(const auto& item : before) data.Append(item);
+    require(nativeVerify(before),"Owned fixture cleanup failed");
     source.Content(nullptr); source.Close();
     std::cout << "Passed: actual WinUI 2 model reorder/restore, original UIElement identities and native model indices in an owned source.\n";
     std::cout << "Passed: actual system WinUI 2 ItemsRepeater public layout/index contract; no Explorer attachment.\n";
