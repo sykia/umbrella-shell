@@ -474,3 +474,36 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK UmbrellaTaskbarHook(int code, 
     }
     return CallNextHookEx(nullptr, code, wparam, lparam);
 }
+
+// Separate entry point in the SAME module: no State, subclass, geometry,
+// popup attachment or restore message. May coexist with an appearance session.
+extern "C" __declspec(dllexport) LRESULT CALLBACK UmbrellaTaskbarInspectHook(int code, WPARAM wparam, LPARAM lparam) {
+    if (code>=0) {
+        const auto* call=reinterpret_cast<const CWPSTRUCT*>(lparam);
+        if (call && call->message==RegisterWindowMessageW(componentObserveMessage) &&
+            call->wParam==protocol && taskbarWindow(call->hwnd)) {
+            const auto observer=reinterpret_cast<HWND>(call->lParam);
+            HANDLE process{};
+            if (trustedOwner(observer,process)) {
+                CloseHandle(process);
+                // A timed-out SendMessage can still be executing on this thread
+                // after the host unhooks. Retain this diagnostic image once per
+                // Explorer process, so that late completion cannot unload code.
+                // No workers, subscriptions or XAML refs survive the callback.
+                static const bool retained=[] {
+                    HMODULE image{};
+                    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+                        reinterpret_cast<LPCWSTR>(&UmbrellaTaskbarInspectHook),&image)!=FALSE;
+                }();
+                if (retained) {
+                    const auto snapshot=components::inspect(call->hwnd);
+                    COPYDATASTRUCT packet{componentSnapshotProtocol,sizeof(snapshot),const_cast<ComponentSnapshot*>(&snapshot)};
+                    DWORD_PTR accepted{};
+                    SendMessageTimeoutW(observer,WM_COPYDATA,reinterpret_cast<WPARAM>(call->hwnd),
+                        reinterpret_cast<LPARAM>(&packet),SMTO_ABORTIFHUNG,1000,&accepted);
+                }
+            }
+        }
+    }
+    return CallNextHookEx(nullptr,code,wparam,lparam);
+}

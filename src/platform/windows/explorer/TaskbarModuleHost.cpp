@@ -14,7 +14,7 @@
 
 namespace {
 using namespace umbrella::explorer;
-struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; };
+struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; bool readOnly = false; };
 std::vector<Attachment> attachments;
 HWND owner{};
 HMODULE module{};
@@ -29,6 +29,12 @@ bool editExperiment = false, reportReceived = false;
 bool verifyOwnerDeath = false;
 bool configureTaskview = false, verifyPlacement = false;
 bool inspectComponents = false;
+bool inspectFixture = false;
+bool fixtureNativeTouched = false;
+LRESULT CALLBACK observerFixtureProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp) {
+    if (message==WM_COPYDATA || message==RegisterWindowMessageW(attachMessage) || message==RegisterWindowMessageW(restoreMessage)) fixtureNativeTouched=true;
+    return DefWindowProcW(window,message,wp,lp);
+}
 HWND snapshotWindow{};
 EditReport editReport;
 std::mutex editReportMutex;
@@ -72,12 +78,17 @@ bool configure(HWND window, unsigned width, bool enabled, unsigned edge = 3, uns
 bool attach(HWND target) {
     if (attachments.size() == 16) return false;
     const auto thread = GetWindowThreadProcessId(target, nullptr);
-    const auto entry = reinterpret_cast<HOOKPROC>(GetProcAddress(module, "UmbrellaTaskbarHook"));
+    const auto entry = reinterpret_cast<HOOKPROC>(GetProcAddress(module, inspectComponents ? "UmbrellaTaskbarInspectHook" : "UmbrellaTaskbarHook"));
     Attachment value{target};
     if (!thread || !entry || !GetWindowRect(target, &value.before)) return false;
-    value.hook = SetWindowsHookExW(WH_CALLWNDPROC, entry, module, thread);
-    if (!value.hook) return false;
+    value.readOnly=inspectComponents;
+    const bool existingObserver=inspectComponents && std::any_of(attachments.begin(),attachments.end(),[&](const auto& item){return item.readOnly && GetWindowThreadProcessId(item.window,nullptr)==thread;});
+    if (!existingObserver) {
+        value.hook = SetWindowsHookExW(WH_CALLWNDPROC, entry, module, thread);
+        if (!value.hook) return false;
+    }
     attachments.push_back(value); // Also clean up an attachment if handshake fails halfway.
+    if (inspectComponents) return true; // Observation never performs an attach handshake.
     DWORD_PTR result{};
     return send(target, RegisterWindowMessageW(attachMessage), protocol, reinterpret_cast<LPARAM>(owner), result)
         && configure(target, 100, false);
@@ -89,11 +100,12 @@ void restore() {
     islands::stop();
     for (const auto& value : attachments) {
         DWORD_PTR result{};
-        if (!send(value.window, RegisterWindowMessageW(restoreMessage), 0, 0, result)) failed = true;
+        if (!value.readOnly && !send(value.window, RegisterWindowMessageW(restoreMessage), 0, 0, result)) failed = true;
         if (value.hook && !UnhookWindowsHookEx(value.hook)) failed = true;
         RECT now{};
         if (GetWindowRect(value.window, &now) &&
-            (now.left != value.before.left || now.right != value.before.right)) failed = true;
+            (now.left != value.before.left || now.right != value.before.right ||
+             (value.readOnly && (now.top!=value.before.top || now.bottom!=value.before.bottom)))) failed = true;
     }
     attachments.clear();
 }
@@ -117,6 +129,8 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
             std::printf("    owner=%ls status=%08lx depth=%u containerId=%u ownerId=%u\n",entry.ownerType,static_cast<unsigned long>(entry.ownerStatus),entry.ownerDepth,entry.containerId,entry.ownerId);
         }
         reportReceived = true;
+        if (FAILED(snapshot.status) && !inspectFixture) failed=true;
+        if (inspectFixture && SUCCEEDED(snapshot.status)) failed=true; // Own fixture has no taskbar XAML host.
         return TRUE;
     }
     if (message == monitorMessage) {
@@ -274,23 +288,24 @@ int wmain(int argc, wchar_t** argv) {
         std::puts(native_layout::installedBuildSupported() ? "native-layout" : "width-only");
         return 0;
     }
-    const bool fixture = argc == 2 && !wcscmp(argv[1], L"--fixture");
+    inspectFixture=argc==2 && !wcscmp(argv[1],L"--fixture-inspect-components");
+    const bool fixture = inspectFixture || (argc == 2 && !wcscmp(argv[1], L"--fixture"));
     const bool serve = argc == 2 && !wcscmp(argv[1], L"--serve");
     const bool inspect = argc == 2 && !wcscmp(argv[1], L"--inspect-taskview");
-    inspectComponents = argc == 2 && !wcscmp(argv[1], L"--inspect-components");
+    inspectComponents = inspectFixture || (argc == 2 && !wcscmp(argv[1], L"--inspect-components"));
     configureTaskview = argc == 2 && !wcscmp(argv[1], L"--configure-taskview");
     verifyOwnerDeath = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-owner-death");
     verifyPlacement = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-placement");
     const bool verify = verifyPlacement || verifyOwnerDeath || (argc == 2 && !wcscmp(argv[1], L"--verify-taskview"));
     editExperiment = inspectComponents || configureTaskview || inspect || verify || (argc == 4 && !wcscmp(argv[1], L"--edit-taskview") && !wcscmp(argv[2], L"--seconds"));
-    if ((serve || editExperiment) && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
+    if ((serve || editExperiment) && !inspectComponents && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
         std::puts("FAILED; another Umbrella taskbar session is active"); return 5;
     }
-    if (editExperiment && !native_layout::installedBuildSupported()) {
+    if (editExperiment && !inspectFixture && !native_layout::installedBuildSupported()) {
         std::puts("FAILED; taskview experiment requires the exact supported taskbar DLLs"); return 5;
     }
     if (!fixture && !serve && !editExperiment && (argc != 5 || wcscmp(argv[1], L"--width") || wcscmp(argv[3], L"--seconds"))) {
-        std::puts("Usage: UmbrellaTaskbarHost --fixture | --serve | --width 40..100 --seconds 1..120 | --inspect-taskview | --edit-taskview --seconds 1..120 | --verify-taskview | --verify-taskview-owner-death");
+        std::puts("Usage: UmbrellaTaskbarHost --fixture | --fixture-inspect-components | --inspect-components | --serve | --width 40..100 --seconds 1..120 | --inspect-taskview | --edit-taskview --seconds 1..120 | --verify-taskview | --verify-taskview-owner-death");
         return 2;
     }
     unsigned width = fixture ? 75 : serve || editExperiment ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
@@ -314,7 +329,7 @@ int wmain(int argc, wchar_t** argv) {
     if (fixture) {
         WNDCLASSW testType = ownerType;
         testType.lpszClassName = L"Umbrella.Taskbar.ModuleFixture.1";
-        testType.lpfnWndProc = DefWindowProcW;
+        testType.lpfnWndProc = inspectFixture ? observerFixtureProcedure : DefWindowProcW;
         RegisterClassW(&testType);
         test = CreateWindowW(testType.lpszClassName, L"Umbrella module geometry test", WS_POPUP,
                              0, 0, GetSystemMetrics(SM_CXSCREEN), 48, nullptr, nullptr, testType.hInstance, nullptr);
@@ -408,14 +423,13 @@ int wmain(int argc, wchar_t** argv) {
     if (inspectComponents && !failed) {
         for (const auto& value : attachments) {
             snapshotWindow = value.window; reportReceived = false;
-            Configuration request;
-            COPYDATASTRUCT packet{componentInspectProtocol, sizeof(request), &request};
             DWORD_PTR accepted{};
-            if (!SendMessageTimeoutW(value.window, WM_COPYDATA, reinterpret_cast<WPARAM>(owner),
-                reinterpret_cast<LPARAM>(&packet), SMTO_ABORTIFHUNG, 3000, &accepted) || !accepted || !reportReceived) failed = true;
+            if (!SendMessageTimeoutW(value.window,RegisterWindowMessageW(componentObserveMessage),protocol,
+                reinterpret_cast<LPARAM>(owner),SMTO_ABORTIFHUNG,3000,&accepted) || !reportReceived) failed = true;
         }
         snapshotWindow = nullptr;
-        restore(); DestroyWindow(owner);
+        restore(); if (inspectFixture && fixtureNativeTouched) failed=true;
+        if (test) DestroyWindow(test); DestroyWindow(owner);
     } else if (editExperiment && !failed) {
         const bool ok = SendMessageW(owner, editMessage, static_cast<WPARAM>(inspect || configureTaskview || verifyPlacement ? EditAction::Inspect : EditAction::Begin), 0) != 0;
         if (inspect || !ok) {
@@ -514,6 +528,6 @@ int wmain(int argc, wchar_t** argv) {
         CloseHandle(inputThread);
     }
     FreeLibrary(module);
-    std::puts(failed ? "FAILED; restore requested" : inspectComponents ? "Passed; read-only component snapshot; native session ended" : editExperiment ? "Passed; taskview reset acknowledged; native session ended" : "Passed; original geometry restored");
+    std::puts(failed ? (inspectComponents ? "FAILED; read-only observation ended; no restore sent" : "FAILED; restore requested") : inspectComponents ? "Passed; read-only component snapshot; observer hook removed; diagnostic image retained until process exit" : editExperiment ? "Passed; taskview reset acknowledged; native session ended" : "Passed; original geometry restored");
     return failed ? 1 : 0;
 }

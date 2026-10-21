@@ -5,6 +5,7 @@
 namespace umbrella::explorer {
 inline constexpr wchar_t attachMessage[] = L"Umbrella.Taskbar.Attach.3";
 inline constexpr wchar_t restoreMessage[] = L"Umbrella.Taskbar.Restore.3";
+inline constexpr wchar_t componentObserveMessage[] = L"Umbrella.Taskbar.ObserveComponents.1";
 inline constexpr wchar_t suspendVisualsMessage[] = L"Umbrella.Taskbar.SuspendVisuals.1";
 inline constexpr wchar_t ownerClass[] = L"Umbrella.Taskbar.ModuleHost.3";
 inline constexpr ULONG_PTR protocol = 0x554d4203;

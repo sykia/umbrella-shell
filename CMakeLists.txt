@@ -155,6 +155,8 @@ if(UMBRELLA_BUILD_APP)
             -File ${CMAKE_CURRENT_SOURCE_DIR}/tests/Test-MenuSettingsLaunch.ps1
             -HostPath $<TARGET_FILE:UmbrellaMenuHost> -FixturePath $<TARGET_FILE:umbrella_menu_settings_fixture>)
         add_test(NAME taskbar_module_geometry COMMAND UmbrellaTaskbarHost --fixture)
+        add_test(NAME taskbar_component_observer COMMAND UmbrellaTaskbarHost --fixture-inspect-components)
+        set_tests_properties(taskbar_component_observer PROPERTIES TIMEOUT 15)
         add_test(NAME settings_ui_smoke COMMAND UmbrellaShell --ui-smoke)
         set_tests_properties(settings_ui_smoke PROPERTIES TIMEOUT 20)
         add_test(NAME host_diagnostics COMMAND UmbrellaShell --diagnostics)

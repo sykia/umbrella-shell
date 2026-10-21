@@ -3,6 +3,7 @@
 #include "TaskbarModuleProtocol.h"
 #include "TaskbarRepeaterAccess.h"
 #include "core/taskbar/ComponentRegistry.h"
+#include "core/taskbar/Placement.h"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <vector>
 #include <algorithm>
@@ -69,7 +70,12 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                     const auto box = element.TransformToVisual(root).TransformBounds(
                         {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});
                     entry.x = box.X; entry.y = box.Y; entry.width = box.Width; entry.height = box.Height;
-                    entry.visible = element.Visibility() == Visibility::Visible && box.Width > 0 && box.Height > 0;
+                    const taskbar::Rectangle measured{box.X,box.Y,box.Width,box.Height};
+                    const taskbar::Rectangle viewport{0,0,root.ActualWidth(),root.ActualHeight()};
+                    // Recycled task-list buttons can retain Visibility::Visible
+                    // at negative offscreen coordinates. They are not live peers.
+                    entry.visible = element.Visibility() == Visibility::Visible &&
+                        taskbar::valid(measured) && taskbar::valid(viewport) && taskbar::intersects(measured,viewport);
                     entry.hitTestVisible = element.IsHitTestVisible();
                     // Discovery alone never grants a movement capability.
                 }

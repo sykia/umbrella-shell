@@ -3,7 +3,8 @@
 param(
     [string]$ToolsRoot = 'tmp/native-tools',
     [string]$QtRoot = 'tmp/qt-sdk',
-    [string]$Output = 'build/local-resume'
+    [string]$Output = 'build/local-resume',
+    [switch]$NativeOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -11,7 +12,7 @@ $root = Split-Path $PSScriptRoot -Parent
 Push-Location $root
 try {
     $tools = (Resolve-Path -LiteralPath $ToolsRoot).Path
-    $qt = (Resolve-Path -LiteralPath $QtRoot).Path
+    $qt = if ($NativeOnly) { '' } else { (Resolve-Path -LiteralPath $QtRoot).Path }
     $vc = Join-Path $tools 'msvc/VC/Tools/MSVC/14.42.34433'
     $compiler = Join-Path $vc 'bin/Hostx64/x64/cl.exe'
     if (!(Test-Path -LiteralPath $compiler)) { throw 'MSVC 14.42 compiler not found.' }
@@ -21,9 +22,10 @@ try {
     $null = New-Item -ItemType Directory -Path $destination
     $includeVc = [IO.Path]::GetRelativePath($root,$vc)
     $includeTools = [IO.Path]::GetRelativePath($root,$tools)
-    $includeQt = [IO.Path]::GetRelativePath($root,$qt)
+    $includeQt = if ($NativeOnly) { '' } else { [IO.Path]::GetRelativePath($root,$qt) }
     $env:INCLUDE = "$includeVc/include;$includeTools/sdk/Include/10.0.26100.0/ucrt;$includeTools/sdk/Include/10.0.26100.0/shared;$includeTools/sdk/Include/10.0.26100.0/um;$includeTools/sdk/Include/10.0.26100.0/winrt;$includeTools/sdk/Include/10.0.26100.0/cppwinrt"
-    $env:LIB = "$vc/lib/x64;$tools/sdk/ucrt/x64;$tools/sdk/um/x64;$qt/lib"
+    $env:LIB = "$vc/lib/x64;$tools/sdk/ucrt/x64;$tools/sdk/um/x64"
+    if (!$NativeOnly) { $env:LIB += ";$qt/lib" }
     function Invoke-Checked([string]$Program, [string[]]$Arguments) {
         & $Program @Arguments
         if ($LASTEXITCODE) { throw "$Program failed: $LASTEXITCODE" }
@@ -34,6 +36,7 @@ try {
     $link = @('/link','/NODEFAULTLIB:OLDNAMES','/DYNAMICBASE','/NXCOMPAT')
     Invoke-Checked $compiler ($common + @('/LD',"/Fe:$destination/UmbrellaTaskbarModule.dll",'src/platform/windows/explorer/TaskbarModule.cpp') + $link + @('user32.lib','comctl32.lib','advapi32.lib','shell32.lib','gdi32.lib','windowsapp.lib','d2d1.lib'))
     Invoke-Checked $compiler ($common + @('/guard:cf',"/Fe:$destination/UmbrellaTaskbarHost.exe",'src/platform/windows/explorer/TaskbarModuleHost.cpp') + $link + @('/guard:cf','user32.lib','advapi32.lib','ole32.lib','oleaut32.lib','uiautomationcore.lib','gdi32.lib','shell32.lib'))
+    if ($NativeOnly) { Write-Output 'Built native taskbar host/module only; no GUI build or deployment.'; return }
     Invoke-Checked $compiler ($common + @('/guard:cf','/LD',"/Fe:$destination/UmbrellaMenuModule.dll",'src/platform/windows/explorer/TaskbarMenuModule.cpp') + $link + @('/guard:cf','user32.lib','comctl32.lib','windowsapp.lib'))
     Invoke-Checked $compiler ($common + @('/guard:cf',"/Fe:$destination/UmbrellaMenuHost.exe",'src/platform/windows/explorer/TaskbarMenuHost.cpp') + $link + @('/guard:cf','/SUBSYSTEM:WINDOWS','user32.lib','shell32.lib'))
     $version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(UmbrellaShell VERSION (\d+\.\d+\.\d+)').Groups[1].Value
