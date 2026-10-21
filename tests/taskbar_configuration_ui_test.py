@@ -200,6 +200,19 @@ def main():
     QTest.mouseRelease(view,Qt.LeftButton,Qt.NoModifier,source+QPoint(35,15))
     require(config() == initial and backend.calls == before_calls and not root.property("dragId"),"Escape applied a change or leaked capture")
     QTest.mouseMove(view,QPoint(880,5)); QTest.qWait(250)
+    # Original Quick Settings is one native group: network and volume travel together.
+    drag("clock","right",2)
+    require(config()["right"]==["overflow","input","clock","network","volume","desktop"],"clock did not swap with native Quick Settings group")
+    drag("network","right",2)
+    require(config()["right"]==initial["right"],"grouped network/volume drag split the original native group")
+    before_calls=list(backend.calls)
+    drag("clock","left",0)
+    require(config()["right"]==initial["right"] and backend.calls==before_calls,"unsupported cross-container tray move applied")
+    backend.apply_ok=False
+    drag("clock","right",2)
+    require(config()["right"]==initial["right"],"refused tray order was displayed or saved")
+    backend.apply_ok=True
+    root.resetLayout();QTest.qWait(30)
     require(not warnings,"QML warnings: " + str(warnings))
     view.grabWindow().save(str(Path(__file__).resolve().parents[1]/"tmp/taskbar-configuration.png"))
     view.close()

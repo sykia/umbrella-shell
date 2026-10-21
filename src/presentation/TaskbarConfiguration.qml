@@ -52,14 +52,12 @@ Rectangle {
     Component.onCompleted: loadMonitor()
     onMonitorChanged: loadMonitor()
     function supported(next) {
-        if (!nativeAvailable || !LayoutModel.valid(next)) return false
-        var expected = LayoutModel.move(LayoutModel.defaults(true), "taskview", "left", 1)
-        return ["available", "left", "center", "right"].every(z => JSON.stringify(next[z]) === JSON.stringify(expected[z]))
+        return nativeAvailable && LayoutModel.nativeConfiguration(next)
     }
     function commit(next) {
         next = LayoutModel.clone(next)
         if (!canSubmit || !supported(next) || !monitor || applying) {
-            feedback = "Доступно перемещение Task View после Виджетов слева."
+            feedback = "Доступны Task View после Виджетов и обмен часов с группой сети/громкости справа."
             return false
         }
         queuedConfiguration = next
@@ -69,7 +67,7 @@ Rectangle {
         return true
     }
     function moveComponent(id, zone, index) {
-        if (id !== "taskview") return false
+        if (["taskview","clock","network","volume"].indexOf(id)<0) return false
         return commit(LayoutModel.move(configuration, id, zone, index))
     }
     Timer {
@@ -106,14 +104,14 @@ Rectangle {
         pointerX = x; pointerY = y; hoverZone = ""; hoverIndex = -1
         var p = availableArea.mapFromItem(editor, x, y)
         if (p.x >= 0 && p.x < availableArea.width && p.y >= 0 && p.y < availableArea.height) {
-            hoverZone = "available"; hoverIndex = configuration.available.filter(v => v !== dragId).length; return
+            hoverZone = "available"; hoverIndex = LayoutModel.remaining(configuration.available,dragId).length; return
         }
         for (var i = 0; i < zones.count; ++i) {
             var zone = zones.itemAt(i)
             p = zone.mapFromItem(editor, x, y)
             if (p.x >= 0 && p.x < zone.width && p.y >= 0 && p.y < zone.height) {
                 hoverZone = zone.zoneKey
-                var count = configuration[hoverZone].filter(v => v !== dragId).length
+                var count = LayoutModel.remaining(configuration[hoverZone],dragId).length
                 hoverIndex = Math.max(0, Math.min(count, Math.floor((p.y - 42 + 28) / 58)))
                 return
             }
@@ -125,7 +123,7 @@ Rectangle {
         if (id && zone) {
             var next = LayoutModel.move(configuration, id, zone, index)
             if (supported(next)) commit(next)
-            else feedback = "Доступно перемещение Task View после Виджетов слева."
+            else feedback = "Доступны Task View после Виджетов и обмен часов с группой сети/громкости справа."
         }
     }
     function resetLayout() {
@@ -167,17 +165,17 @@ Rectangle {
         property bool inCatalog: false
         readonly property bool knownHere: !!(info.seen && editor.monitor && (editor.monitor.primary || info.secondary))
         objectName: "component_" + componentId
-        readonly property bool movable: componentId === "taskview" && editor.nativeAvailable && !editor.applying
+        readonly property bool movable: ["taskview","clock","network","volume"].indexOf(componentId)>=0 && editor.nativeAvailable && !editor.applying
         height: 52; radius:10
         color: mouse.pressed ? "#40ffffff" : mouse.containsMouse ? "#28ffffff" : "#15ffffff"
         border.width: 1; border.color: "#20ffffff"
-        opacity: editor.dragId === componentId ? 0 : 1
+        opacity: editor.dragId && LayoutModel.dragIds(editor.dragId).indexOf(componentId)>=0 ? 0 : 1
         Behavior on color { ColorAnimation { duration:120 } }
         Column {
             anchors.left:parent.left; anchors.leftMargin:36; anchors.right:parent.right; anchors.rightMargin:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
             Label { width:parent.width; text:chip.info.label; font.pixelSize:11; maximumLineCount:1; elide:Text.ElideRight }
             Label { width:parent.width; font.pixelSize:9; opacity:0.6
-                text: chip.movable ? "После Виджетов слева" : ""
+                text: chip.movable ? (componentId === "taskview" ? "После Виджетов слева" : "Часы ↔ сеть и громкость справа") : ""
                 visible:chip.movable
             }
         }
@@ -196,7 +194,7 @@ Rectangle {
                 Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
             }
         }
-        ToolTip.text: chip.movable ? "Task View → Слева, после Виджетов" : LayoutModel.movementBlocker(componentId,
+        ToolTip.text: chip.movable ? (componentId === "taskview" ? "Task View → Слева, после Виджетов" : "Часы и общая системная группа сети/громкости меняются местами справа") : LayoutModel.movementBlocker(componentId,
             !!(editor.monitor && editor.monitor.primary), !!(editor.system && editor.system.componentPlacementAvailable))
         Accessible.name: info.label
         MouseArea {
@@ -284,9 +282,8 @@ Rectangle {
                                 id:slot
                                 required property string modelData
                                 required property int index
-                                readonly property int sourceIndex: editor.configuration[zone.zoneKey].indexOf(editor.dragId)
-                                readonly property int insertionIndex:index - (sourceIndex >= 0 && sourceIndex < index ? 1 : 0)
-                                readonly property bool source:editor.dragId === modelData
+                                readonly property int insertionIndex:LayoutModel.remaining(editor.configuration[zone.zoneKey].slice(0,index),editor.dragId).length
+                                readonly property bool source:!!editor.dragId && LayoutModel.dragIds(editor.dragId).indexOf(modelData)>=0
                                 width:cards.width
                                 Rectangle {
                                     width:parent.width
@@ -304,7 +301,7 @@ Rectangle {
                         }
                         Rectangle {
                             width:parent.width
-                            height:editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === editor.configuration[zone.zoneKey].filter(v => v !== editor.dragId).length ? 58 : 0
+                            height:editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === LayoutModel.remaining(editor.configuration[zone.zoneKey],editor.dragId).length ? 58 : 0
                             color:"transparent"; clip:true
                             Behavior on height { NumberAnimation { duration:110 } }
                             Rectangle { anchors.centerIn:parent; width:parent.width; height:3; radius:1; color:editor.accent }

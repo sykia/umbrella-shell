@@ -5,6 +5,39 @@
 
 ## Подтверждённые результаты
 
+21 октября, рабочий Clock/Quick Settings reorder: собственный Windows XAML fixture
+проверил logical child order, реальные slots, исходный Click/TabIndex/parent,
+reset, отказ при новом peer и запрет затирания чужой коллекции. QML offscreen suite
+проверил drag часов и связанной пары network/volume, ошибочный межзонный drop,
+native refusal и прежние Task View/queue/monitor/Escape сценарии без warnings.
+
+На настоящем Explorer подтверждены оба порядка: Clock x=2448 → 2388 DIP,
+Quick Settings x=2388 → 2488 DIP при неизменных размерах. Проверены явный reset,
+совместный Task View после Widgets и возврат при EOF/завершении своего host.
+Измеренные round trips command → ack: 1,76–2,92 мс, включая IPC и native apply;
+изолированное native-время и полная drag/drop latency не измерялись.
+
+Quiet `umbrella_configuration_desktop_test --tray-only` прошёл настоящий backend
+при запущенном обычном host оформления: apply → сохранение → новый владелец →
+appearance + tray replay → selected reset. INI и Run/Advanced keys изолированы
+также в собственном recovery-worker. До исправления выявлены отсутствующий
+Advanced key в тестовом sandbox и лишняя отправка текущей стороны при restore;
+последняя нарушала проверку foreground/состояния. После исправлений итоговый
+прогон завершился за 1080 мс: совпали HWND/rect/workarea/DPI/регионы/extended styles/
+alpha двух панелей, PID/start time Explorer, foreground игры и реальные Run/
+TaskbarLocation. SendInput/SetFocus/flyout не вызывались. Наблюдаемые дельты Explorer:
+private +532 КиБ, working set +52 КиБ, handles/threads 0; фоновые изменения не
+изолированы, это не доказательство утечки или её отсутствия.
+
+Полная MSVC/Qt 6.8.3 сборка `build/taskbar-reorder` успешна, после найденного
+restore-дефекта затронутые GUI/host/test targets пересобраны точечно. Core reorder,
+placement, XAML, IPC/session, snapshot protocol, geometry и Dock isolated fixtures
+прошли. Qt runtime/QML plugins развёрнуты локально, diagnostics этой сборки прошёл.
+Первоначально отсутствовавшие Qt6Test/qoffscreen для quiet-fixture добавлены из того
+же Qt SDK. Установка, release, вход в Windows, реальные popup/контекстные меню,
+keyboard navigation и D3D smoke во время игры не проверялись. Старый установленный
+runtime автоматически не заменялся.
+
 21 октября, первая разрешённая read-only проверка реального Explorer: новый
 observer прошёл две панели, 17 записей на каждой, 306/224 посещённых узла.
 Подтверждены TaskbarCollapsibleLayout, обёртка Search на глубине 2 и StackPanel

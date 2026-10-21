@@ -40,6 +40,16 @@ function movementBlocker(id, primary, available) {
     if (id !== "taskview") return "Нужен проверенный адаптер контейнера SystemTray и его hit-test/flyout."
     return ""
 }
+function dragIds(id) { return id === "network" || id === "volume" ? ["network","volume"] : [id] }
+function remaining(items,id) { var group=dragIds(id); return items.filter(v => group.indexOf(v)<0) }
+function nativeConfiguration(value) {
+    if (!valid(value)) return false
+    var base=defaults(true), left=move(base,"taskview","left",1)
+    var same=(a,b) => JSON.stringify(a)===JSON.stringify(b)
+    var taskview=(same(value.left,base.left) && same(value.center,base.center)) || (same(value.left,left.left) && same(value.center,left.center))
+    var tray=same(value.right,base.right) || same(value.right,["overflow","input","clock","network","volume","desktop"])
+    return taskview && tray && same(value.available,base.available)
+}
 function defaults(primary) {
     var result = {version:1, available:[], left:[], center:[], right:[], gap:8}
     catalog.forEach(function(c) { result[c.seen && (primary || c.secondary) ? c.zone : "available"].push(c.id) })
@@ -59,9 +69,9 @@ function valid(value) {
 function move(value, id, zone, index) {
     if (!valid(value) || !component(id) || ["available","left","center","right"].indexOf(zone) < 0) return null
     var next = clone(value)
-    for (var z of ["available","left","center","right"]) next[z] = next[z].filter(function(v) { return v !== id })
+    for (var z of ["available","left","center","right"]) next[z] = remaining(next[z],id)
     if (!Number.isInteger(index) || index < 0 || index > next[zone].length) return null
-    next[zone].splice(index, 0, id)
+    next[zone].splice.apply(next[zone],[index,0].concat(dragIds(id)))
     return next
 }
 // Only this placement will be advertised after its desktop integration check.

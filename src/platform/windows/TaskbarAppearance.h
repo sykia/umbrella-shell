@@ -12,6 +12,8 @@ public:
     bool apply(const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error);
     bool applyMonitor(const QString& device, const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error);
     bool restore(QString& error);
+    bool nativeSessionActive() const;
+    bool reorderTray(const QString& device,bool enabled,QString& error);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -88,8 +88,8 @@ Taskbar. TaskbarLayout.js хранит version=1 и четыре списка ID
 TaskbarSettings сохраняет запись выбранного монитора в INI. ID и признак primary
 берутся из общего TaskbarRuntime::monitors(). Другие компоненты и вторая панель
 блокируются до drag. Нет произвольных сохраняемых перестановок, выдаваемых за Windows.
-GUI разрешает только Task View после Widgets слева на основной исходной нижней
-панели 48 DIP / DPI 100%. Host --configure-taskview измеряет текущий wrapper,
+GUI разрешает Task View после Widgets слева на основной исходной нижней
+панели 48 DIP / DPI 100%, а также обмен Clock/Quick Settings справа. Host --configure-taskview измеряет текущий wrapper,
 меняет Translation и проверяет пересечения, не включая drag на системной панели.
 Restore ждёт отката и удаляет только выбранную component-конфигурацию; при ошибке
 применения backend пытается восстановить предыдущую подтверждённую позицию.
@@ -97,6 +97,19 @@ Restore ждёт отката и удаляет только выбранную 
 от них и используется механизмом безопасного восстановления при запуске.
 Сквозной fixture проверил drop → native → сохранение → новый владелец → Restore;
 настоящий вход в Windows этим не заменяется. [Проверки и ограничения](TASKBAR_CONFIGURATION.md).
+
+Static StackPanel адаптер трея переставляет исходную UIElementCollection через
+ограниченную core model-транзакцию; изменяются реальные layout slots и порядок
+детей. Разрешён только обмен соседних Clock/Quick Settings, без переноса Show
+Desktop и неизвестных peers. В serve-режиме `tray 0|1 <device>` идёт в тот же State
+оформления и recovery worker. Отказ не закрывает host оформления. Component reset
+в таком режиме возвращает только порядок; native-restore также проверяет rollback
+перед ack. Поля прежнего EditRequest/EditReport сохранены; добавлены новые actions,
+поэтому host/module следует поставлять вместе. Конфигурации Task View + tray
+допустимы в самостоятельной component-сессии; tray-only может сохранить действующее
+оформление и восстановить его перед replay. При восстановлении неизменной стороны
+не отправляется повторный native edge notification, способный поднять taskbar
+над полноэкранным приложением.
 
 Толщина задаёт Width (боковая панель) или Height (горизонтальная) настоящего
 TaskbarFrame в DIP. Его уведомление о размере обновляет нативный кэш Explorer,

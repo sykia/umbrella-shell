@@ -102,11 +102,11 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
     QString error;
     if (freshSession && !appearance_.restore(error)) { status_ = error; emit changed(); return false; }
     const auto confirmed = settings.value("confirmedComponentV1").toMap();
-    if (!confirmed.isEmpty()) {
+    if (!confirmed.isEmpty() && confirmed["configuration"].toMap()["left"].toStringList().contains("taskview")) {
         if (!componentSession_.stop(error)) { status_ = error; emit changed(); return false; }
         const bool applied = applyComponentConfiguration(confirmed["monitor"].toString(), confirmed["configuration"].toMap());
         if (!applied) {
-            status_ = QStringLiteral("Сохранённое размещение Task View сейчас несовместимо; настройки сохранены."); emit changed();
+            status_ = QStringLiteral("Сохранённое размещение компонентов сейчас несовместимо; настройки сохранены."); emit changed();
         }
         restored_ = !activeComponentConfiguration_.isEmpty();
         // A compatible Explorer can expose its bridge before Task View exists.
@@ -127,7 +127,10 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
         if (!widthAvailable()) { skipped.append(QStringLiteral("нативный модуль")); continue; }
         targets.append({monitor["device"].toString(), value, monitor["primary"].toBool()});
     }
-    if (targets.isEmpty()) { status_ = QStringLiteral("Сохранённые параметры сейчас несовместимы; файл настроек не изменён."); emit changed(); return true; }
+    if (targets.isEmpty()) {
+        if(!confirmed.isEmpty()){const bool ok=applyComponentConfiguration(confirmed["monitor"].toString(),confirmed["configuration"].toMap());restored_=ok;return ok;}
+        status_ = QStringLiteral("Сохранённые параметры сейчас несовместимы; файл настроек не изменён."); emit changed(); return true;
+    }
     std::stable_sort(targets.begin(), targets.end(), [](const Target& a, const Target& b) { return a.primary && !b.primary; });
     bool autoHide = settings.value("autoHide", autoHide_).toBool();
     for (const auto& target : targets) {
@@ -161,6 +164,7 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
     applyAutoHide(autoHide);
     if (!skipped.isEmpty()) status_ = QStringLiteral("Пропущены несовместимые параметры: ") + skipped.join(", ") + QStringLiteral(". Выбор сохранён.");
     if (!setResumeAtLogin(true)) status_ = QStringLiteral("Оформление восстановлено, но записать автозапуск не удалось.");
+    if(!confirmed.isEmpty() && !applyComponentConfiguration(confirmed["monitor"].toString(),confirmed["configuration"].toMap()))return false;
     emit changed();
     return true;
 }
@@ -285,9 +289,10 @@ QVariantList TaskbarSettings::layoutMonitors() const {
 }
 
 bool TaskbarSettings::resetComponentLayout() {
-    QString error; const bool ok = componentSession_.stop(error);
-    status_ = ok ? QStringLiteral("Исходная позиция Task View восстановлена; остальные компоненты не изменялись.") : error;
+    QString error; const bool ok = trayInAppearance_ ? appearance_.reorderTray(trayDevice_,false,error) : componentSession_.stop(error);
+    status_ = ok ? QStringLiteral("Исходные позиции Task View и групп трея восстановлены.") : error;
     if (ok) {
+        trayInAppearance_=false;trayDevice_.clear();
         activeComponentConfiguration_.clear(); activeComponentMonitor_.clear();
         QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
         settings.remove("confirmedComponentV1"); settings.sync();
@@ -359,8 +364,8 @@ bool TaskbarSettings::saveComponentDraft(const QString& monitor, const QVariantM
 }
 
 namespace {
-// Only the measured placement of original Task View is accepted. Arbitrary old
-// drafts must never be saved as a native-confirmed layout.
+// Only measured Task View placement and the adjacent Clock/Quick Settings swap
+// are accepted. Arbitrary drafts must never become native-confirmed layouts.
 bool supportedComponentConfiguration(const QVariantMap& configuration) {
     if (!validDraft(configuration)) return false;
     const auto value = QJsonObject::fromVariantMap(configuration);
@@ -370,20 +375,42 @@ bool supportedComponentConfiguration(const QVariantMap& configuration) {
         "right":["overflow","input","network","volume","clock","desktop"],
         "available":["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"]
     })").object();
-    for (const auto key : {"left", "center", "right", "available"})
-        if (value.value(key) != expected.value(key)) return false;
-    return true;
+    if(value.value("available")!=expected.value("available"))return false;
+    const bool taskViewLeft=value.value("left")==expected.value("left") && value.value("center")==expected.value("center");
+    const bool taskViewDefault=value.value("left")==QJsonArray{"widgets"} && value.value("center")==QJsonArray{"start","search","taskview","apps"};
+    const bool trayDefault=value.value("right")==expected.value("right");
+    const bool trayClockFirst=value.value("right")==QJsonArray{"overflow","input","clock","network","volume","desktop"};
+    return (taskViewLeft || taskViewDefault) && (trayDefault || trayClockFirst);
 }
 }
 bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration) {
     if (!supportedComponentConfiguration(configuration)) return false;
     const auto previous = activeComponentConfiguration_;
     const auto previousMonitor = activeComponentMonitor_;
-    if (!placeTaskViewAfterWidgets(monitor, configuration.value("gap").toInt())) {
+    const auto nativeApply=[&](const QString& target,const QVariantMap& value) {
+        bool primary=false;QString device;
+        for(const auto& entry:layoutMonitors())if(entry.toMap()["id"].toString()==target){primary=entry.toMap()["primary"].toBool();device=entry.toMap()["device"].toString();}
+        if(pending_ || !primary){status_=QStringLiteral("Эта перестановка поддерживается только на основной панели.");return false;}
+        QString error;
+        const bool left=value["left"].toStringList().contains("taskview");
+        const bool clockFirst=value["right"].toStringList().indexOf("clock")<value["right"].toStringList().indexOf("network");
+        if(!left && appearance_.nativeSessionActive()) {
+            if(!componentSession_.stop(error) || !appearance_.reorderTray(device,clockFirst,error)){status_=error;return false;}
+            trayInAppearance_=true;trayDevice_=device;return true;
+        }
+        if(trayInAppearance_) {
+            if(!appearance_.reorderTray(trayDevice_,false,error)){status_=error;return false;}
+            trayInAppearance_=false;trayDevice_.clear();
+        }
+        const bool ok=componentSession_.configureComponents(left,value["gap"].toInt(),clockFirst,error);
+        if(!ok)status_=error;
+        return ok;
+    };
+    if (!nativeApply(monitor,configuration)) {
         qWarning().noquote() << "Component placement:" << status_;
         // Rejection can close the host. Re-establish the last confirmed layout.
         bool recovered = previous.isEmpty();
-        if (!previous.isEmpty()) recovered = placeTaskViewAfterWidgets(previousMonitor, previous.value("gap").toInt());
+        if (!previous.isEmpty()) recovered = nativeApply(previousMonitor,previous);
         if (!recovered) {
             activeComponentConfiguration_.clear(); activeComponentMonitor_.clear();
             // Never replay a record whose native rollback could not be confirmed.
@@ -393,7 +420,7 @@ bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const 
             status_ = settings.status() == QSettings::NoError
                 ? QStringLiteral("Перемещение и восстановление прежней позиции не подтверждены. Повторное применение отключено.")
                 : QStringLiteral("Восстановление позиции и удаление записи автоприменения не подтверждены.");
-        } else status_ = QStringLiteral("Не удалось переместить компонент. Прежняя подтверждённая позиция сохранена.");
+        } else if(!previous.isEmpty()) status_ = QStringLiteral("Не удалось переместить компонент. Прежняя подтверждённая позиция сохранена.");
         emit changed(); return false;
     }
     activeComponentConfiguration_ = configuration;

@@ -1,4 +1,4 @@
-// Explicit desktop integration test: moves ONE original Task View from settings.
+// Explicit desktop integration: original Task View, or quiet --tray-only mode.
 // Never registered with CTest; do not run in unattended CI.
 #include <Windows.h>
 #include <objbase.h>
@@ -14,8 +14,13 @@
 #include <QQmlEngine>
 #include <QtTest/QTest>
 #include <QElapsedTimer>
+#include <QProcess>
+#include <QRegularExpression>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <cstdio>
 #include <string>
+#include <cstring>
 using Microsoft::WRL::ComPtr;
 namespace {
 QQuickItem* item(QQuickItem* root, const QString& name) {
@@ -26,7 +31,17 @@ QQuickItem* item(QQuickItem* root, const QString& name) {
 QPoint center(QQuickItem* value) { return value->mapToScene(QPointF(value->width()/2,value->height()/2)).toPoint(); }
 }
 int main(int argc, char** argv) {
-    if ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000) return 2;
+    if(argc==5 && !std::strcmp(argv[1],"--taskbar-watch")) {
+        QCoreApplication watcher(argc,argv);
+        const std::wstring sandbox=L"Software\\UmbrellaShell\\ConfigurationTest-"+std::to_wstring(watcher.arguments()[2].toULong());
+        HKEY registry{};
+        if(RegOpenKeyExW(HKEY_CURRENT_USER,sandbox.c_str(),0,KEY_ALL_ACCESS,&registry)!=ERROR_SUCCESS)return 2;
+        if(RegOverridePredefKey(HKEY_CURRENT_USER,registry)!=ERROR_SUCCESS){RegCloseKey(registry);return 2;}
+        struct RegistryExit {HKEY key;~RegistryExit(){RegOverridePredefKey(HKEY_CURRENT_USER,nullptr);RegCloseKey(key);}} registryExit{registry};
+        return umbrella::platform::watchTaskbarAppearance(watcher.arguments()[2].toULong(),watcher.arguments()[3],watcher.arguments()[4]);
+    }
+    const bool quietTray=argc==2 && !std::strcmp(argv[1],"--tray-only");
+    if (!quietTray && ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000)) return 2;
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) { std::fprintf(stderr, "%s\n", message.toUtf8().constData()); });
     QGuiApplication app(argc,argv);
     if (app.arguments().size()!=2) return 2;
@@ -63,8 +78,12 @@ int main(int argc, char** argv) {
         std::wstring path = L"Software\\UmbrellaShell\\ConfigurationTest-" + std::to_wstring(GetCurrentProcessId());
         bool active = false;
         RegistrySandbox() {
-            if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &key, nullptr) == ERROR_SUCCESS)
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+                HKEY advanced{};
+                if(RegCreateKeyExW(key,L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced",0,nullptr,0,KEY_ALL_ACCESS,nullptr,&advanced,nullptr)!=ERROR_SUCCESS)return;
+                RegCloseKey(advanced);
                 active = RegOverridePredefKey(HKEY_CURRENT_USER, key) == ERROR_SUCCESS;
+            }
         }
         ~RegistrySandbox() {
             if (active) RegOverridePredefKey(HKEY_CURRENT_USER, nullptr);
@@ -72,6 +91,56 @@ int main(int argc, char** argv) {
         }
     } registrySandbox;
     if (!registrySandbox.active) return 4;
+    if(app.arguments()[1]=="--tray-only") {
+        // Quiet end-to-end mode: no view, SendInput, SetFocus or flyout invocation.
+        // Both preferences and Run-key writes remain inside the sandboxes above.
+        const auto snapshot=[&]() {
+            QProcess probe;
+            probe.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* value){value->flags|=CREATE_NO_WINDOW;});
+            probe.start(QCoreApplication::applicationDirPath()+"/UmbrellaTaskbarHost.exe",{"--inspect-components"});
+            if(!probe.waitForFinished(5000) || probe.exitCode()!=0)return QString();
+            const QString output=QString::fromUtf8(probe.readAllStandardOutput());
+            QString result;
+            for(const auto& role:{QStringLiteral("clock"),QStringLiteral("quicksettings")}) {
+                const auto match=QRegularExpression("^  "+role+" .*?bounds=\\(([^)]+)\\) visible=1",QRegularExpression::MultilineOption).match(output);
+                if(!match.hasMatch())return QString();
+                result+=role+":"+match.captured(1)+";";
+            }
+            return result;
+        };
+        const auto foreground=GetForegroundWindow();
+        const auto original=snapshot();if(original.isEmpty())return 11;
+        const auto configuration=QJsonDocument::fromJson(R"({"version":1,"gap":8,
+            "left":["widgets"],"center":["start","search","taskview","apps"],
+            "right":["overflow","input","clock","network","volume","desktop"],
+            "available":["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"]})").object().toVariantMap();
+        QString monitor;
+        {
+            TaskbarSettings model;
+            for(const auto& item:model.layoutMonitors())if(item.toMap()["primary"].toBool())monitor=item.toMap()["id"].toString();
+            // Start the ordinary appearance owner at the existing native size.
+            // The real tray apply must share it, rather than replacing its host.
+            model.apply("bottom",false,0,false,100,48,false);
+            QSettings profile(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+            if(!profile.contains("appearanceProfilesV1")){std::fprintf(stderr,"Appearance setup: %s\n",model.status().toUtf8().constData());return 19;}
+            if(!model.applyComponentConfiguration(monitor,configuration)){std::fprintf(stderr,"Tray apply: %s\n",model.status().toUtf8().constData());return 12;}
+            if(model.activeComponentConfiguration()!=configuration || model.componentDraft(monitor)!=configuration || snapshot()==original)return 13;
+            auto invalid=configuration;invalid["right"]=QStringList{"overflow","input","network","clock","volume","desktop"};
+            if(model.applyComponentConfiguration(monitor,invalid) || model.componentDraft(monitor)!=configuration)return 14;
+        }
+        if(snapshot()!=original)return 15;
+        {
+            TaskbarSettings restarted;
+            if(!restarted.restoreSavedAppearance() || restarted.activeComponentConfiguration()!=configuration || snapshot()==original)return 16;
+            if(!restarted.restoreComponentConfiguration(monitor) || snapshot()!=original)return 17;
+        }
+        QSettings state(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+        if(state.contains("confirmedComponentV1") || state.value("resumeAppearance",true).toBool() || GetForegroundWindow()!=foreground){
+            std::printf("Tray reset diagnostics: confirmed=%u resume=%u foreground=%u\n",state.contains("confirmedComponentV1"),state.value("resumeAppearance",true).toBool(),GetForegroundWindow()==foreground);return 18;
+        }
+        std::puts("Passed: real tray order through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
+        return 0;
+    }
     QVariantMap confirmedForRestart;
     QString confirmedMonitor;
     {

@@ -6,6 +6,7 @@
 #include "TaskbarPopupPlacement.h"
 #include "TaskbarButtonEdit.h"
 #include "TaskbarComponentSnapshot.h"
+#include "TaskbarTrayOrder.h"
 #include <shellapi.h>
 #include <CommCtrl.h>
 #include <array>
@@ -22,6 +23,7 @@ struct State {
     visual_layout::Session visuals;
     smooth_clip::Session smooth;
     button_edit::Session buttonEdit;
+    tray_order::Session trayOrder;
     bool detached = false;
     SIZE clipSize{};
     UINT clipDpi{};
@@ -213,7 +215,8 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         state->visuals.suspend(); return TRUE;
     }
     if (message == RegisterWindowMessageW(restoreMessage) || message == WM_NCDESTROY) {
-        state->buttonEdit.reset(); // Includes owner-death recovery before DLL teardown.
+        const bool trayRestored=state->trayOrder.reset();
+        const bool buttonRestored=state->buttonEdit.reset(); // Includes owner-death recovery before DLL teardown.
         state->restoring = true;
         detachPopups(state);
         suspendAllVisuals(state->owner);
@@ -241,6 +244,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                          state->original.bottom - state->original.top,
                          SWP_NOACTIVATE | SWP_NOZORDER);
         dispose(state);
+        if(message!=WM_NCDESTROY)return trayRestored && buttonRestored ? TRUE : FALSE;
         return DefSubclassProc(hwnd, message, wparam, lparam);
     }
     if (message == WM_COPYDATA && reinterpret_cast<HWND>(wparam) == state->owner) {
@@ -256,7 +260,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         }
         if (packet && packet->dwData == editProtocol && packet->cbData == sizeof(EditRequest) && packet->lpData) {
             const auto request = *static_cast<const EditRequest*>(packet->lpData);
-            if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::AfterWidgets) return FALSE;
+            if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::ResetTaskView) return FALSE;
             HRESULT status = S_OK;
             if (request.action == EditAction::Begin) {
                 // Experiment never combines with resizing, islands or native edge changes.
@@ -265,9 +269,18 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                 status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.position(hwnd, request.position);
             } else if (request.action == EditAction::AfterWidgets) {
                 status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.afterWidgets(hwnd, request.position);
+            } else if (request.action == EditAction::TrayClockFirst) {
+                status=(request.position!=0 && request.position!=1) ? E_ACCESSDENIED : state->trayOrder.clockBeforeQuickSettings(hwnd,request.position==1);
+            } else if (request.action == EditAction::ResetTaskView) {
+                if(!state->buttonEdit.reset())status=E_FAIL;
             } else if (request.action == EditAction::Preview && !state->buttonEdit.preview()) status = E_FAIL;
-            else if (request.action == EditAction::Reset && !state->buttonEdit.reset()) status = E_FAIL;
-            auto report = state->buttonEdit.report(hwnd, status);
+            else if (request.action == EditAction::Reset) {
+                const bool tray=state->trayOrder.reset(), button=state->buttonEdit.reset();
+                if(!tray || !button)status=E_FAIL;
+            }
+            EditReport report;
+            if(request.action==EditAction::TrayClockFirst)report.status=status;
+            else report=state->buttonEdit.report(hwnd,status);
             COPYDATASTRUCT reply{editReportProtocol, sizeof(report), &report};
             DWORD_PTR received{};
             return SendMessageTimeoutW(state->owner, WM_COPYDATA, reinterpret_cast<WPARAM>(hwnd),

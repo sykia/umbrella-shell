@@ -31,7 +31,7 @@ static_assert(sizeof(Configuration) == 32);
 // Opt-in developer experiment; never included in the persistent configuration.
 inline constexpr ULONG_PTR editProtocol = protocol + 2;
 inline constexpr ULONG_PTR editReportProtocol = protocol + 3;
-enum class EditAction : std::uint32_t { Inspect, Begin, Preview, Reset, Status, Place, AfterWidgets };
+enum class EditAction : std::uint32_t { Inspect, Begin, Preview, Reset, Status, Place, AfterWidgets, TrayClockFirst, ResetTaskView };
 struct EditRequest {
     std::uint32_t size = sizeof(EditRequest);
     std::uint32_t version = 1;

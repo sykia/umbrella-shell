@@ -21,7 +21,7 @@ bool TaskbarModuleSession::waitForLine(const QByteArray& expected) {
         while (host_.canReadLine()) {
             const auto line = host_.readLine(512).trimmed();
             if (line == expected) return true;
-            if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused") return false;
+            if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused" || line.startsWith("tray-refused ")) return false;
         }
         if (!host_.waitForReadyRead(static_cast<int>(3000 - elapsed.elapsed()))) return false;
     }
@@ -82,6 +82,39 @@ bool TaskbarModuleSession::stop(QString& error) {
     host_.closeWriteChannel(); // EOF restores the subclass and original rectangle, then exits.
     if (!host_.waitForFinished(4000) || host_.exitStatus() != QProcess::NormalExit || host_.exitCode() != 0) {
         error = QStringLiteral("Модуль панели ещё не подтвердил восстановление."); return false;
+    }
+    return true;
+}
+bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,bool clockFirst,QString& error) {
+    if(gap<0 || gap>96 || !layoutAvailable()){error=QStringLiteral("Нативное размещение компонентов несовместимо с этой сборкой Windows.");return false;}
+    if(host_.state()==QProcess::NotRunning) {
+        host_.setProgram(hostPath());host_.setArguments({"--configure-taskview"});
+        host_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
+        host_.start();
+        if(!host_.waitForStarted(3000) || !waitForLine("layout-ready")) {
+            QString ignored;stop(ignored);error=QStringLiteral("Нужна совместимая исходная основная панель без другой native-сессии.");return false;
+        }
+    }
+    const QList<QByteArray> commands{
+        taskViewLeft ? QByteArray("after-widgets ")+QByteArray::number(gap)+'\n' : QByteArray("taskview-reset\n"),
+        QByteArray("tray-clock-first ")+(clockFirst ? "1\n" : "0\n")};
+    for(const auto& command:commands) {
+        if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("taskview-ok")) {
+            QString rollback;
+            const bool restored=stop(rollback);
+            error=restored ? QStringLiteral("Windows отказала в перестановке; исходное состояние восстановлено.")
+                : QStringLiteral("Перестановка и откат не подтверждены. Автоприменение новой конфигурации не сохранено.");
+            return false;
+        }
+    }
+    return true;
+}
+bool TaskbarModuleSession::reorderTray(const QString& device,bool enabled,QString& error) {
+    if(!device.startsWith(QStringLiteral("\\\\.\\DISPLAY")) || device.size()>32 || device.contains(' ') || device.contains('\n')){error=QStringLiteral("Недопустимый монитор.");return false;}
+    if(!running()){if(!enabled)return true;error=QStringLiteral("Сессия оформления не запущена.");return false;}
+    const auto command=QByteArray("tray ")+(enabled?"1 ":"0 ")+device.toLatin1()+'\n';
+    if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("tray-ok "+device.toLatin1())) {
+        error=QStringLiteral("Windows не подтвердила порядок трея. Оформление не отключалось.");return false;
     }
     return true;
 }

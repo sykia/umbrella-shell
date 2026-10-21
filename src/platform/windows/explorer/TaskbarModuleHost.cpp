@@ -36,11 +36,15 @@ LRESULT CALLBACK observerFixtureProcedure(HWND window,UINT message,WPARAM wp,LPA
     return DefWindowProcW(window,message,wp,lp);
 }
 HWND snapshotWindow{};
+HWND nativeEditTarget{};
 EditReport editReport;
 std::mutex editReportMutex;
 constexpr UINT editMessage = WM_APP + 20;
 unsigned currentEdge = 3;
 constexpr UINT monitorMessage = WM_APP + 21;
+constexpr UINT trayMessage=WM_APP+22;
+std::mutex trayRequestMutex;
+char pendingTrayDevice[64]{};
 struct MonitorRequest { unsigned width{}, packed{}; char device[64]{}; };
 char pendingMonitor[64]{};
 void CALLBACK popupChanged(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD);
@@ -100,7 +104,7 @@ void restore() {
     islands::stop();
     for (const auto& value : attachments) {
         DWORD_PTR result{};
-        if (!value.readOnly && !send(value.window, RegisterWindowMessageW(restoreMessage), 0, 0, result)) failed = true;
+        if (!value.readOnly && (!send(value.window, RegisterWindowMessageW(restoreMessage), 0, 0, result) || !result)) failed = true;
         if (value.hook && !UnhookWindowsHookEx(value.hook)) failed = true;
         RECT now{};
         if (GetWindowRect(value.window, &now) &&
@@ -147,8 +151,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         }
         std::puts("error monitor-unavailable"); std::fflush(stdout); return 0;
     }
-    if (message == WM_COPYDATA && editExperiment && attachments.size() == 1 &&
-        reinterpret_cast<HWND>(wp) == attachments.front().window) {
+    if (message == WM_COPYDATA && nativeEditTarget && reinterpret_cast<HWND>(wp) == nativeEditTarget) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
         if (!packet || packet->dwData != editReportProtocol || packet->cbData != sizeof(EditReport) || !packet->lpData) return FALSE;
         const auto& report = *static_cast<const EditReport*>(packet->lpData);
@@ -157,13 +160,31 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         reportReceived = true;
         return TRUE;
     }
-    if (message == editMessage && editExperiment && attachments.size() == 1) {
+    if(message==trayMessage) {
+        char device[64]{};
+        if(wp>1 || lp)return FALSE;
+        {const std::lock_guard lock(trayRequestMutex);strcpy_s(device,pendingTrayDevice);pendingTrayDevice[0]=0;}
+        if(!device[0])return FALSE;
+        for(const auto& item:attachments) {
+            MONITORINFOEXW info{};info.cbSize=sizeof(info);char current[64]{};
+            if(!GetMonitorInfoW(MonitorFromWindow(item.window,MONITOR_DEFAULTTONULL),&info))continue;
+            WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,current,64,nullptr,nullptr);
+            if(std::strcmp(device,current))continue;
+            nativeEditTarget=item.window;
+            const bool ok=SendMessageW(window,editMessage,static_cast<WPARAM>(EditAction::TrayClockFirst),wp)!=0;
+            std::printf(ok?"tray-ok %s\n":"tray-refused %s\n",device);std::fflush(stdout);return ok;
+        }
+        std::printf("tray-refused %s\n",device);std::fflush(stdout);return FALSE;
+    }
+    if (message == editMessage && ((editExperiment && attachments.size()==1) || nativeEditTarget)) {
         EditRequest request; request.action = static_cast<EditAction>(wp); request.position = static_cast<double>(lp);
         COPYDATASTRUCT packet{editProtocol, sizeof(request), &request};
         DWORD_PTR accepted{}; reportReceived = false;
+        if(!nativeEditTarget)nativeEditTarget=attachments.front().window;
         // Permit only the bounded reentrant report handler above during this call.
-        const bool ok = SendMessageTimeoutW(attachments.front().window, WM_COPYDATA,
+        const bool ok = SendMessageTimeoutW(nativeEditTarget, WM_COPYDATA,
             reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&packet), SMTO_ABORTIFHUNG, 3000, &accepted) && accepted && reportReceived;
+        nativeEditTarget=nullptr;
         if (reportReceived) {
             std::printf("taskview status=%08lx edit=%u drag=%u moves=%u clicks=%u focus=%u offset=%.1f button=(%.1f,%.1f,%.1f) parentWidth=%.1f\n",
                 static_cast<unsigned long>(editReport.status), editReport.editing, editReport.dragging, editReport.moves,
@@ -177,7 +198,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
                         editReport.chain[i].name, editReport.chain[i].width, editReport.chain[i].height);
         }
         std::puts(ok ? "taskview-ok" : "taskview-refused"); std::fflush(stdout);
-        if (!ok) failed = true;
+        if (!ok && editExperiment) failed = true;
         return ok;
     }
     if (message == RegisterWindowMessageW(L"Umbrella.Taskbar.MenuOpened.1")) {
@@ -444,6 +465,9 @@ int wmain(int argc, wchar_t** argv) {
                         PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Place), x);
                     else if (sscanf_s(line, "after-widgets %u %c", &x, &extra, 1u) == 1 && x <= 96)
                         PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::AfterWidgets), x);
+                    else if (sscanf_s(line, "tray-clock-first %u %c", &x, &extra, 1u) == 1 && x<=1)
+                        PostMessageW(owner,editMessage,static_cast<WPARAM>(EditAction::TrayClockFirst),x);
+                    else if (!std::strcmp(line,"taskview-reset\n")) PostMessageW(owner,editMessage,static_cast<WPARAM>(EditAction::ResetTaskView),0);
                     else if (!std::strcmp(line, "status\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Status), 0);
                     else if (!std::strcmp(line, "reset\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0);
                     else break;
@@ -495,6 +519,10 @@ int wmain(int argc, wchar_t** argv) {
             while (std::fgets(line, sizeof(line), stdin)) {
                 unsigned width{}, edge{}, thickness = 48, mode = 0, detached = 0; char extra{};
                 MonitorRequest request;
+                if(sscanf_s(line,"tray %u %63s %c",&width,request.device,64u,&extra,1u)==2 && width<=1) {
+                    {const std::lock_guard lock(trayRequestMutex);strcpy_s(pendingTrayDevice,request.device);}
+                    SendMessageW(owner,trayMessage,width,0);continue;
+                }
                 const int perMonitor = sscanf_s(line, "%u %u %u %u %u %63s %c", &width, &edge, &thickness, &mode, &detached, request.device, 64u, &extra, 1u);
                 if (perMonitor == 6 && width >= 40 && width <= 100 && edge <= 3 && thickness >= (mode ? 64u : 48u) && thickness <= 96 && mode <= 1 && detached <= 1) {
                     request.width = width;

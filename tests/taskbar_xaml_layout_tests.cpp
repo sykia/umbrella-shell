@@ -4,6 +4,7 @@
 #include "platform/windows/explorer/TaskbarLayoutSlotAdapter.h"
 #include "platform/windows/explorer/TaskbarRepeaterAccess.h"
 #include "platform/windows/explorer/TaskbarRepeaterModel.h"
+#include "platform/windows/explorer/TaskbarPanelOrder.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Automation.Provider.h>
@@ -299,6 +300,23 @@ void exercise() {
             << " original=" << bindings[0].measured.x << ',' << bindings[0].measured.y << ',' << bindings[0].measured.width << ',' << bindings[0].measured.height << '\n';
     require(taskbar::same(current,bindings[0].measured),"parent reflow did not restore its own layout slots");
     require(taskbar::transact(undo,adapter) == taskbar::Transaction::Stale,"parent reflow accepted stale snapshot");
+    explorer::panel_order::Session collection;
+    require(collection.bind(parent),"Static panel order could not bind");
+    const std::vector<UIElement> logicalOrder{third,first,second};
+    require(collection.apply(logicalOrder)==taskbar::Transaction::Applied,"Static native child collection did not reorder");
+    require(parent.Children().GetAt(0)==third && first.TransformToVisual(parent).TransformPoint({0,0}).X>=43,"Collection order did not update real native slots");
+    require(first.TabIndex()==0 && second.TabIndex()==1 && third.TabIndex()==2 && Media::VisualTreeHelper::GetParent(first)==parent,"Collection reorder changed original properties/parent");
+    auto originalPeer=Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(first);
+    originalPeer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();
+    MSG orderMessage{}; while(PeekMessageW(&orderMessage,nullptr,0,0,PM_REMOVE)){TranslateMessage(&orderMessage);DispatchMessageW(&orderMessage);}
+    require((*clicks)[0]==2 && GetForegroundWindow()==foreground,"Static reordered button lost original Click or changed foreground");
+    require(collection.reset() && parent.Children().GetAt(0)==first && parent.Children().GetAt(2)==third,"Static native child collection failed to restore");
+    require(collection.bind(parent),"Static panel could not rebind after restore");
+    Controls::Button dynamicPeer; parent.Children().Append(dynamicPeer); parent.UpdateLayout();
+    require(collection.apply(logicalOrder)==taskbar::Transaction::Stale,"New system child was overwritten by stale order");
+    require(!collection.reset() && parent.Children().Size()==4,"Reset overwrote a newer system collection");
+    parent.Children().RemoveAt(3); parent.UpdateLayout();
+    require(collection.reset(),"Fixture-owned cleanup could not release stale binding");
     source.Content(nullptr); source.Close();
     std::cout << "Passed: original Windows XAML buttons in private offscreen HWND, layout slots, same parent/Translation/TabIndex, original Click via automation, restore and stale reflow rejection. Explorer/foreground untouched.\n";
 }

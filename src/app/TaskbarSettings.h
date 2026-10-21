@@ -63,6 +63,8 @@ private:
     bool restored_ = false;
     QVariantMap activeComponentConfiguration_;
     QString activeComponentMonitor_;
+    bool trayInAppearance_=false;
+    QString trayDevice_;
     bool available_ = false, autoHide_ = false, pending_ = false;
     QString status_;
     QString edge_ = "bottom";

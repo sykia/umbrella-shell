@@ -120,7 +120,9 @@ bool restoreSnapshots(const std::vector<Snapshot>& snapshots, int edge) {
     const auto primary = FindWindowW(L"Shell_TrayWnd", nullptr);
     for (const auto& s : snapshots) {
         if (!valid(s)) continue; // Never touch a recycled HWND or a new Explorer process.
-        if (s.hwnd == primary && edge >= 0 && edge <= 3) ok = sendEdge(primary, edge) && ok;
+        // Re-sending the current edge can raise/rebuild the taskbar over a
+        // fullscreen application. Restore it only when it actually changed.
+        if (s.hwnd == primary && edge >= 0 && edge <= 3 && currentEdge()!=edge) ok = sendEdge(primary, edge) && ok;
         auto style = GetWindowLongPtrW(s.hwnd, GWL_EXSTYLE);
         if (s.layered) {
             SetLastError(0);
@@ -390,6 +392,8 @@ bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge,
     }
     error = QStringLiteral("Monitor taskbar unavailable."); return false;
 }
+bool TaskbarAppearance::nativeSessionActive() const {return impl_->module.running();}
+bool TaskbarAppearance::reorderTray(const QString& device,bool enabled,QString& error) {return impl_->module.reorderTray(device,enabled,error);}
 bool TaskbarAppearance::restore(QString& error) {
     auto& d = *impl_;
     const bool alive = std::any_of(d.snapshots.begin(), d.snapshots.end(), [](const Snapshot& value) { return valid(value); });
