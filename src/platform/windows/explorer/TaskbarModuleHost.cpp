@@ -102,15 +102,17 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
         if (!packet || packet->dwData != componentSnapshotProtocol || packet->cbData != sizeof(ComponentSnapshot) || !packet->lpData) return FALSE;
         const auto snapshot = *static_cast<const ComponentSnapshot*>(packet->lpData);
-        if (snapshot.size != sizeof(snapshot) || snapshot.version != 1 || snapshot.count > maxComponentSnapshot || snapshot.visited > 512) return FALSE;
+        if (!validComponentSnapshot(snapshot)) return FALSE;
         std::printf("components status=%08lx count=%u visited=%u\n", static_cast<unsigned long>(snapshot.status), snapshot.count, snapshot.visited);
         if (SUCCEEDED(snapshot.status)) for (unsigned i = 0; i < snapshot.count; ++i) {
             auto entry = snapshot.entries[i];
             if (!entry.id[0]) continue;
             entry.id[23] = entry.type[95] = entry.parentType[95] = entry.parentName[79] = 0;
+            entry.layoutType[95]=0;
             std::printf("  %ls type=%ls parent=%ls/%ls bounds=(%.1f,%.1f,%.1f,%.1f) visible=%u hit=%u movement=unverified\n",
                 entry.id, entry.type, entry.parentType, entry.parentName, entry.x, entry.y, entry.width, entry.height,
                 entry.visible, entry.hitTestVisible);
+            std::printf("    layout=%ls status=%08lx modelIndex=%d\n",entry.layoutType,static_cast<unsigned long>(entry.layoutStatus),entry.modelIndex);
         }
         reportReceived = true;
         return TRUE;

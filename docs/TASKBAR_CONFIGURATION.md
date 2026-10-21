@@ -7,6 +7,44 @@
 
 ## Использование
 
+### Подготовка native-модели — 21 октября 2026
+
+`--inspect-components` теперь выдаёт snapshot version=2: у непосредственных детей
+WinUI 2 ItemsRepeater добавлены настоящий runtime-класс Layout, HRESULT доступа
+и modelIndex. Доступ идёт через QueryInterface публичного versioned IItemsRepeater,
+без новых RVA, изменения vtable, модели или родителя. Один Layout читается один раз
+на parent в пределах снимка. Отрицательный index означает, что элемент не признан
+реализованным элементом этой модели; это не позиция для автоматической записи.
+Host и module для диагностики должны происходить из одной сборки. Edit ABI Task View
+не изменился; проверки системных DLL сохранены.
+
+В отдельном процессе fixture активирует системный WinUI 2 CBS ItemsRepeater,
+подключает собственную observable-модель трёх оригинальных UIElement и проверяет
+перестановку `[0,1,2] → [2,0,1] → [0,1,2]` через фактические model indices.
+Виртуализация offscreen viewport может recycle элементы; fixture явно реализует
+только свои три объекта и проверяет их исходную идентичность. Layout/index getters
+отказывают для неподдерживаемого объекта и null. Это не mock ItemsRepeater.
+
+Framework DLL остаётся загруженной до выхода короткоживущего fixture: XAML metadata
+и factory caches могут пережить Close WindowsXamlManager. Ранняя ручная выгрузка
+вызвала AV в первоначальном эксперименте и исключена из проверенного пути.
+Новые runtime DLL не копируются и не устанавливаются; fixture использует системную
+Microsoft.UI.Xaml.CBS и не подключается к Explorer.
+
+Полный Reorder ещё не готов. Успешная запись в модели, которой владеет fixture,
+не разрешает менять чужую модель Taskbar. На Explorer команда нового снимка и новые
+перестановки в этой сессии не запускались. Следующий native-адаптер должен подтвердить
+фактический layout/model ownership и жизненный цикл объектов Taskbar; до этого
+остальные карточки не получают ложного native-capability.
+
+Проверка этапа: полная сборка `Build-Local.ps1 -Output build/reorder-prepared`
+успешна; XAML/ItemsRepeater, core reorder, placement, session, Dock fixture и host
+`--fixture` прошли. После добавления проверки snapshot framing отдельно пересобраны
+host и protocol test: несовпадение v1/v2, усечённый снимок и превышение лимитов
+отклоняются. Core microbenchmark: 1000 планов по 64 объекта — 21 мс в этой сессии;
+это не измерение задержки drag/drop или native apply в Explorer. Их задержка и
+изменение ресурсов Explorer не измерялись.
+
 ### Незавершённый этап Taskbar Reorder — 20 октября 2026
 
 Продолжение второго этапа: общий core-planner рассчитывает несколько групп в

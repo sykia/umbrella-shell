@@ -61,6 +61,7 @@ try {
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_dock_thumbnail_tests.exe",'tests/dock_thumbnail_tests.cpp') + $link + @('dwmapi.lib'))
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_dock_fixture_tests.exe",'tests/dock_fixture_tests.cpp','src/app/DockController.cpp',"$destination/moc_DockController.cpp") + $platform + @("$destination/qrc_settings.cpp") + $link + $libraries + @('psapi.lib'))
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_placement_tests.exe",'tests/taskbar_placement_tests.cpp') + $link)
+    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_snapshot_protocol_tests.exe",'tests/taskbar_snapshot_protocol_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_reorder_tests.exe",'tests/taskbar_reorder_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_xaml_layout_tests.exe",'tests/taskbar_xaml_layout_tests.cpp') + $link + @('/MANIFEST:NO','windowsapp.lib','user32.lib'))
     Copy-Item -LiteralPath tests/taskbar_xaml_layout_tests.manifest -Destination "$destination/umbrella_xaml_layout_tests.exe.manifest"

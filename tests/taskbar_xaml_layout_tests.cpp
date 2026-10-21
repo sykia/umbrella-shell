@@ -2,6 +2,7 @@
 #include <Windows.h>
 #undef GetCurrentTime
 #include "platform/windows/explorer/TaskbarLayoutSlotAdapter.h"
+#include "platform/windows/explorer/TaskbarRepeaterAccess.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Automation.Provider.h>
@@ -12,6 +13,92 @@
 using namespace winrt::Windows::UI::Xaml;
 using namespace umbrella;
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void exerciseRepeaterContract() {
+    wchar_t systemDirectory[MAX_PATH]{};
+    require(GetWindowsDirectoryW(systemDirectory,MAX_PATH)>0,"Windows directory unavailable");
+    const auto path = std::wstring(systemDirectory)+L"\\SystemApps\\Microsoft.UI.Xaml.CBS_8wekyb3d8bbwe\\Microsoft.UI.Xaml.dll";
+    const HMODULE module=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
+    require(module!=nullptr,"System WinUI 2 CBS runtime unavailable");
+    using GetFactory=HRESULT(WINAPI*)(void*,void**);
+    const auto getFactory=reinterpret_cast<GetFactory>(GetProcAddress(module,"DllGetActivationFactory"));
+    require(getFactory!=nullptr,"WinUI 2 activation factory unavailable");
+    winrt::Windows::Foundation::IActivationFactory factory{nullptr};
+    const winrt::hstring name=L"Microsoft.UI.Xaml.Controls.ItemsRepeater";
+    winrt::check_hresult(getFactory(winrt::get_abi(name),winrt::put_abi(factory)));
+    constexpr GUID repeaterFactoryId{0xc3c1f244,0x67a8,0x568f,{0xa6,0xf7,0x5d,0xa8,0xb0,0xea,0xdd,0x49}};
+    winrt::com_ptr<::IInspectable> creating;
+    winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(factory))->QueryInterface(repeaterFactoryId,creating.put_void()));
+    using Create=HRESULT(STDMETHODCALLTYPE*)(void*,void*,void**,void**);
+    auto** factoryTable=*reinterpret_cast<void***>(creating.get());
+    explorer::repeater::Value instance{nullptr},inner{nullptr};
+    winrt::check_hresult(reinterpret_cast<Create>(factoryTable[6])(creating.get(),nullptr,winrt::put_abi(inner),winrt::put_abi(instance)));
+    require(instance.try_as<FrameworkElement>()!=nullptr,"Activated repeater is not Windows.UI.Xaml");
+    explorer::repeater::Value layout{nullptr};
+    winrt::check_hresult(explorer::repeater::layout(instance,layout));
+    require(layout!=nullptr,"Actual ItemsRepeater layout unavailable");
+    Controls::Button unrelated;
+    int index=123;
+    winrt::check_hresult(explorer::repeater::elementIndex(instance,unrelated,index));
+    require(index==-1,"Unrelated element received a repeater model index");
+    require(explorer::repeater::layout(unrelated,layout)==E_NOINTERFACE && !layout,"Plain button granted repeater layout access");
+    index=123;
+    require(explorer::repeater::elementIndex(unrelated,unrelated,index)==E_NOINTERFACE && index==-1,"Unsupported object granted a model index");
+    require(explorer::repeater::layout(nullptr,layout)==E_INVALIDARG && !layout,"Null repeater accepted");
+    // This fixture owns its source. Never perform this mutation on Explorer's
+    // foreign source merely because its interface happens to be writable.
+    auto data=winrt::single_threaded_observable_vector<explorer::repeater::Value>();
+    const std::array<Controls::Button,3> originals{};
+    for (const auto& button : originals) { button.Width(44); button.Height(48); data.Append(button); }
+    winrt::com_ptr<::IInspectable> contract;
+    winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(instance))->QueryInterface(explorer::repeater::itemsRepeaterId,contract.put_void()));
+    auto** table=*reinterpret_cast<void***>(contract.get());
+    using PutSource=HRESULT(STDMETHODCALLTYPE*)(void*,void*);
+    winrt::check_hresult(reinterpret_cast<PutSource>(table[7])(contract.get(),winrt::get_abi(data)));
+    struct Window {
+        HWND handle=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"STATIC",L"",WS_POPUP,-32000,-32000,1000,160,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+        ~Window(){ if(handle) DestroyWindow(handle); }
+    } window;
+    require(window.handle!=nullptr,"Repeater fixture HWND failed");
+    Hosting::DesktopWindowXamlSource source;
+    auto host=source.as<IDesktopWindowXamlSourceNative>();
+    winrt::check_hresult(host->AttachToWindow(window.handle));
+    HWND child{}; winrt::check_hresult(host->get_WindowHandle(&child));
+    require(SetWindowPos(child,nullptr,0,0,1000,160,SWP_NOACTIVATE|SWP_NOZORDER)!=FALSE,"Repeater fixture sizing failed");
+    auto view=instance.as<FrameworkElement>(); source.Content(view);
+    ShowWindow(child,SW_SHOWNOACTIVATE); ShowWindow(window.handle,SW_SHOWNOACTIVATE);
+    const auto flush=[&] {
+        view.InvalidateMeasure(); view.Measure({1000,160}); view.Arrange({0,0,1000,160}); view.UpdateLayout();
+        MSG message{}; while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+    };
+    using Realize=HRESULT(STDMETHODCALLTYPE*)(void*,int,void**);
+    for(int i=0;i<3;++i) {
+        explorer::repeater::Value realized{nullptr};
+        winrt::check_hresult(reinterpret_cast<Realize>(table[21])(contract.get(),i,winrt::put_abi(realized)));
+        require(realized==originals[i],"ItemsRepeater replaced original UIElement");
+    }
+    flush();
+    const auto verify=[&](const std::array<int,3>& expected) {
+        for(int i=0;i<3;++i) {
+            // The offscreen viewport may legitimately recycle every element.
+            // Explicitly realize only these three fixture-owned data objects.
+            explorer::repeater::Value realized{nullptr};
+            winrt::check_hresult(reinterpret_cast<Realize>(table[21])(contract.get(),expected[i],winrt::put_abi(realized)));
+            require(realized==originals[i],"Native reordered source replaced an original object");
+            int actual=-1; winrt::check_hresult(explorer::repeater::elementIndex(instance,originals[i],actual));
+            if(actual!=expected[i]) std::cerr << "model object=" << i << " actual=" << actual << " expected=" << expected[i] << '\n';
+            require(actual==expected[i],"Native repeater model index does not match confirmed order");
+        }
+    };
+    verify({0,1,2});
+    const auto third=data.GetAt(2); data.RemoveAt(2); data.InsertAt(0,third); flush();
+    verify({1,2,0});
+    data.RemoveAt(0); data.Append(third); flush(); verify({0,1,2});
+    source.Content(nullptr); source.Close();
+    std::cout << "Passed: actual WinUI 2 model reorder/restore, original UIElement identities and native model indices in an owned source.\n";
+    std::cout << "Passed: actual system WinUI 2 ItemsRepeater public layout/index contract; no Explorer attachment.\n";
+    // XAML metadata/factory caches can outlive WindowsXamlManager::Close.
+    // Keep this one OS framework module loaded until this fixture process exits.
+}
 void exercise() {
     struct Window {
         HWND handle = CreateWindowExW(WS_EX_NOACTIVATE|WS_EX_TOOLWINDOW,L"STATIC",L"",WS_POPUP,
@@ -128,6 +215,7 @@ int main() {
         winrt::init_apartment(winrt::apartment_type::single_threaded);
         auto manager = Hosting::WindowsXamlManager::InitializeForCurrentThread();
         exercise();
+        exerciseRepeaterContract();
         manager.Close();
         return 0;
     } catch (const winrt::hresult_error& error) {

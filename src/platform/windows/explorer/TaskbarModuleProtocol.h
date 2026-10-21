@@ -60,14 +60,21 @@ inline constexpr ULONG_PTR componentSnapshotProtocol = protocol + 5;
 inline constexpr unsigned maxComponentSnapshot = 48;
 struct ComponentSnapshotEntry {
     wchar_t id[24]{}, type[96]{}, parentType[96]{}, parentName[80]{};
+    wchar_t layoutType[96]{};
+    HRESULT layoutStatus = E_NOINTERFACE;
+    std::int32_t modelIndex = -1;
     double x{}, y{}, width{}, height{};
     std::uint32_t visible{}, hitTestVisible{};
 };
 struct ComponentSnapshot {
-    std::uint32_t size = sizeof(ComponentSnapshot), version = 1;
+    std::uint32_t size = sizeof(ComponentSnapshot), version = 2;
     HRESULT status = E_FAIL;
     std::uint32_t count{}, visited{};
     ComponentSnapshotEntry entries[maxComponentSnapshot]{};
 };
 static_assert(sizeof(ComponentSnapshot) < 65536);
+inline bool validComponentSnapshot(const ComponentSnapshot& snapshot) noexcept {
+    return snapshot.size==sizeof(ComponentSnapshot) && snapshot.version==2 &&
+        snapshot.count<=maxComponentSnapshot && snapshot.visited<=512;
+}
 }

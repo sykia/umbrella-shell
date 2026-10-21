@@ -1,9 +1,12 @@
 #pragma once
 #include "TaskbarContextMenu.h"
 #include "TaskbarModuleProtocol.h"
+#include "TaskbarRepeaterAccess.h"
 #include "core/taskbar/ComponentRegistry.h"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <vector>
+#include <algorithm>
+#include <iterator>
 
 namespace umbrella::explorer::components {
 using namespace winrt::Windows::UI::Xaml;
@@ -22,6 +25,8 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
             root = parent;
         }
         std::vector<DependencyObject> pending{root};
+        struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type; };
+        std::vector<ParentLayout> layouts;
         unsigned visited = 0;
         while (!pending.empty()) {
             if (++visited > 512) { result.status = E_ABORT; return result; }
@@ -39,6 +44,19 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                     if (parent) {
                         wcsncpy_s(entry.parentType, winrt::get_class_name(parent).c_str(), _TRUNCATE);
                         wcsncpy_s(entry.parentName, parent.Name().c_str(), _TRUNCATE);
+                        if (winrt::get_class_name(parent)==L"Microsoft.UI.Xaml.Controls.ItemsRepeater") {
+                            auto cached=std::find_if(layouts.begin(),layouts.end(),[&](const auto& value){return value.parent==parent;});
+                            if (cached==layouts.end()) {
+                                repeater::Value layout{nullptr};
+                                const HRESULT status=repeater::layout(parent,layout);
+                                layouts.push_back({parent,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{}});
+                                cached=std::prev(layouts.end());
+                            }
+                            entry.layoutStatus=cached->status;
+                            wcsncpy_s(entry.layoutType,cached->type.c_str(),_TRUNCATE);
+                            int index=-1;
+                            if (SUCCEEDED(repeater::elementIndex(parent,element,index))) entry.modelIndex=index;
+                        }
                     }
                     const auto box = element.TransformToVisual(root).TransformBounds(
                         {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});
