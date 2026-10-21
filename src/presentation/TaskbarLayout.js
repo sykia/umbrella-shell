@@ -32,6 +32,14 @@ var catalog = [
     {id:"remote", label:"Удалённый сеанс / запись экрана", zone:"right"}
 ]
 function component(id) { return catalog.filter(function(c) { return c.id === id })[0] }
+function movementBlocker(id, primary, available) {
+    if (!available) return "Нужны совместимые системные DLL и native-host рядом с приложением."
+    if (!primary) return "Native-перенос на дополнительной панели ещё не проверен."
+    if (id === "apps" || id === "appoverflow") return "Нужен адаптер динамической модели приложений: Translation не меняет порядок и Win+номер."
+    if (id === "widgets" || id === "start" || id === "search") return "Нужен адаптер раскладки ItemsRepeater и проверка системных flyout и клавиатурного порядка."
+    if (id !== "taskview") return "Нужен проверенный адаптер контейнера SystemTray и его hit-test/flyout."
+    return ""
+}
 function defaults(primary) {
     var result = {version:1, available:[], left:[], center:[], right:[], gap:8}
     catalog.forEach(function(c) { result[c.seen && (primary || c.secondary) ? c.zone : "available"].push(c.id) })

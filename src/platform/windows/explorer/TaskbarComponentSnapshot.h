@@ -1,0 +1,59 @@
+#pragma once
+#include "TaskbarContextMenu.h"
+#include "TaskbarModuleProtocol.h"
+#include "core/taskbar/ComponentRegistry.h"
+#include <winrt/Windows.UI.Xaml.Automation.h>
+#include <vector>
+
+namespace umbrella::explorer::components {
+using namespace winrt::Windows::UI::Xaml;
+// Called only by an explicit diagnostic request on the existing Explorer UI
+// thread. Bounded snapshot, no retained XAML objects, subscriptions or polling.
+inline ComponentSnapshot inspect(HWND hwnd) noexcept {
+    ComponentSnapshot result;
+    try {
+        auto root = context_menu::taskbarElement(hwnd);
+        if (!root || !root.XamlRoot()) return result;
+        // Include SystemTray siblings of TaskbarFrame without crossing XamlRoot.
+        for (unsigned i = 0; i < 8; ++i) {
+            auto parent = Media::VisualTreeHelper::GetParent(root).try_as<FrameworkElement>();
+            if (!parent) break;
+            if (parent.XamlRoot() != root.XamlRoot() || i == 7) return result;
+            root = parent;
+        }
+        std::vector<DependencyObject> pending{root};
+        unsigned visited = 0;
+        while (!pending.empty()) {
+            if (++visited > 512) { result.status = E_ABORT; return result; }
+            auto node = pending.back(); pending.pop_back();
+            if (auto element = node.try_as<FrameworkElement>()) {
+                const auto type = winrt::get_class_name(element);
+                const auto role = taskbar::identify(type.c_str(), element.Name().c_str(),
+                    Automation::AutomationProperties::GetAutomationId(element).c_str());
+                if (role != taskbar::Component::Unknown) {
+                    if (result.count == maxComponentSnapshot) { result.status = E_ABORT; return result; }
+                    auto& entry = result.entries[result.count++];
+                    wcsncpy_s(entry.id, taskbar::stableId(role), _TRUNCATE);
+                    wcsncpy_s(entry.type, type.c_str(), _TRUNCATE);
+                    auto parent = Media::VisualTreeHelper::GetParent(element).try_as<FrameworkElement>();
+                    if (parent) {
+                        wcsncpy_s(entry.parentType, winrt::get_class_name(parent).c_str(), _TRUNCATE);
+                        wcsncpy_s(entry.parentName, parent.Name().c_str(), _TRUNCATE);
+                    }
+                    const auto box = element.TransformToVisual(root).TransformBounds(
+                        {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});
+                    entry.x = box.X; entry.y = box.Y; entry.width = box.Width; entry.height = box.Height;
+                    entry.visible = element.Visibility() == Visibility::Visible && box.Width > 0 && box.Height > 0;
+                    entry.hitTestVisible = element.IsHitTestVisible();
+                    // Discovery alone never grants a movement capability.
+                }
+            }
+            const int count = Media::VisualTreeHelper::GetChildrenCount(node);
+            if (count < 0 || pending.size() + count > 512) { result.status = E_ABORT; return result; }
+            for (int i = 0; i < count; ++i) pending.push_back(Media::VisualTreeHelper::GetChild(node, i));
+        }
+        result.visited = visited; result.status = S_OK;
+    } catch (...) { result.status = winrt::to_hresult(); }
+    return result;
+}
+}

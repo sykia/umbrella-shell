@@ -1,0 +1,100 @@
+#include "core/taskbar/Reorder.h"
+#include <cstdlib>
+#include <iostream>
+#include <map>
+#include <chrono>
+#include <stdexcept>
+using namespace umbrella::taskbar;
+void require(bool value, const char* message) { if (!value) { std::cerr << message << '\n'; std::exit(1); } }
+struct Adapter {
+    std::map<std::uint64_t, Rectangle> elements;
+    unsigned writes = 0, failAt = 0;
+    bool throwing = false, ignored = false, rollbackBroken = false, acceptAll = true;
+    bool read(std::uint64_t id, Rectangle& result) { if (!elements.contains(id)) return false; result = elements[id]; return true; }
+    bool write(std::uint64_t id, Rectangle value) {
+        ++writes;
+        if (rollbackBroken && writes > failAt) return false;
+        if (!ignored) elements[id] = value;
+        if (writes == failAt) { if (throwing) throw std::runtime_error("partially completed setter"); return false; }
+        return true;
+    }
+    bool accept(std::uint64_t) { return acceptAll; }
+};
+int main() {
+    const std::array items{
+        MeasuredItem{1, Component::Widgets, {0,0,100,48}, true},
+        MeasuredItem{2, Component::Start, {300,0,44,48}, true},
+        MeasuredItem{3, Component::Search, {344,0,120,48}, true},
+        MeasuredItem{4, Component::TaskView, {464,0,44,48}, true},
+        MeasuredItem{5, Component::Applications, {508,0,44,48}, true},
+        MeasuredItem{6, Component::Applications, {556,0,44,48}, true}};
+    const std::array request{
+        Assignment{Component::Search, Zone::Left}, Assignment{Component::Widgets, Zone::Left},
+        Assignment{Component::Applications, Zone::Center}, Assignment{Component::TaskView, Zone::Right},
+        Assignment{Component::Start, Zone::Right}};
+    const auto layout = plan(items, request, 1000,48,8);
+    require(layout.status == PlanStatus::Ready && layout.moves.size() == 6, "multi-zone reorder refused");
+    require(layout.moves[0].instance == 3 && layout.moves[0].after.x == 0, "same-zone order lost");
+    require(layout.moves[1].instance == 1 && layout.moves[1].after.x == 128, "group gap lost");
+    require(layout.moves[3].after.x-layout.moves[2].after.x == 48, "native task-list internal offsets changed");
+    require(layout.moves[5].after.x == 956, "right boundary not anchored");
+    Adapter original; for (const auto item : items) original.elements[item.instance] = item.bounds;
+    auto native = original;
+    require(transact(layout.moves,native) == Transaction::Applied, "batch apply failed");
+    for (const auto move : layout.moves) require(same(native.elements[move.instance],move.after), "wrong committed native position");
+    native = original; native.failAt = 3;
+    require(transact(layout.moves,native) == Transaction::RolledBack && native.writes == 6, "partial setter failure did not reverse all touched elements");
+    for (const auto item : items) require(same(native.elements[item.instance],item.bounds), "rollback lost original geometry");
+    native = original; native.failAt = 3; native.throwing = true;
+    require(transact(layout.moves,native) == Transaction::RolledBack, "throwing native setter escaped rollback");
+    native = original; native.ignored = true;
+    require(transact(layout.moves,native) == Transaction::RolledBack, "ignored write committed");
+    native = original; native.acceptAll = false;
+    require(transact(layout.moves,native) == Transaction::RolledBack, "native verification refusal committed");
+    native = original; native.failAt = 3; native.rollbackBroken = true;
+    require(transact(layout.moves,native) == Transaction::RollbackFailed && native.writes == 6, "rollback failure concealed or stopped later restores");
+    native = original; native.elements.erase(2);
+    require(transact(layout.moves,native) == Transaction::Stale && native.writes == 0, "unloaded object mutated peers");
+    native = original; native.elements[2].x += 10;
+    require(transact(layout.moves,native) == Transaction::Stale && native.writes == 0, "stale snapshot mutated peers");
+    auto blocked = items; blocked[2].movable = false;
+    require(plan(blocked,request,1000,48,8).status == PlanStatus::Unsupported, "discovery granted native capability");
+    require(plan(items,request,300,48,8).status != PlanStatus::Ready, "overflow accepted");
+    const std::array tray{Rectangle{940,0,60,48}};
+    const auto collision = plan(items,request,1000,48,8,tray);
+    require(collision.status == PlanStatus::Collision && collision.moves.empty(), "tray obstacle ignored or rejected plan exposed writable moves");
+    const std::array absent{Assignment{Component::Clock,Zone::Right}};
+    require(plan(items,absent,1000,48,8).status == PlanStatus::Missing, "absent conditional component invented");
+    const std::array duplicate{request[0],request[0]};
+    require(plan(items,duplicate,1000,48,8).status == PlanStatus::Invalid, "duplicate role accepted");
+    auto changed = std::vector<MeasuredItem>(items.begin(),items.end());
+    changed.push_back({7,Component::Applications,{604,0,44,48},true});
+    const auto expanded = plan(changed,request,1000,48,8);
+    require(expanded.status == PlanStatus::Ready && expanded.moves.size() == 7, "new task-list instance not included");
+    changed.erase(changed.begin()+4);
+    require(plan(changed,request,1000,48,8).status == PlanStatus::Ready, "closed task-list instance broke group");
+    const auto secondMonitor = plan(items,request,1600,48,8);
+    require(secondMonitor.status == PlanStatus::Ready && secondMonitor.moves[5].after.x == 1556 &&
+        layout.moves[5].after.x == 956, "monitor geometry was shared or cached across panels");
+    native = original;
+    const std::array unchanged{Move{1,items[0].bounds,items[0].bounds}};
+    require(transact(unchanged,native) == Transaction::Applied && native.writes == 0, "no-op wrote native properties");
+    auto invalid = layout.moves; invalid[1].after = invalid[0].after;
+    require(transact(invalid,native) == Transaction::Invalid && native.writes == 0, "overlapping transaction mutated native state");
+    auto ambiguous = items; ambiguous[2].role = Component::Start;
+    const std::array startOnly{Assignment{Component::Start,Zone::Left}};
+    require(plan(ambiguous,startOnly,1000,48,8).status == PlanStatus::Ambiguous, "duplicate singleton granted capability");
+    std::vector<MeasuredItem> maximum;
+    for (unsigned i=0; i<maxReorderItems; ++i) maximum.push_back({i+1,Component::Applications,{44.0*i,0,44,48},true});
+    const std::array appsOnly{Assignment{Component::Applications,Zone::Center}};
+    const auto started = std::chrono::steady_clock::now();
+    for (unsigned i=0; i<1000; ++i) {
+        const auto measured = plan(maximum,appsOnly,4096,48,8);
+        require(measured.status == PlanStatus::Ready && measured.moves.size() == maxReorderItems, "bounded maximum fixture failed");
+    }
+    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-started).count();
+    maximum.push_back({65,Component::Applications,{2816,0,44,48},true});
+    require(plan(maximum,appsOnly,4096,48,8).status == PlanStatus::Invalid, "unbounded item count accepted");
+    std::cout << "Passed: batch order/zones, dynamic app groups, capability/bounds, stale snapshots, partial/throwing/ignored setters and reverse rollback.\n";
+    std::cout << "Planner fixture only: 1000 layouts x 64 items in " << duration << " ms; no native/drag latency measured.\n";
+}

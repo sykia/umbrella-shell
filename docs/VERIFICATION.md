@@ -283,3 +283,23 @@ Foundation и аудит текущего индекса (267 файлов) пр
 в Windows ещё не проверен; перезагрузка, выход из Windows и перезапуск Explorer
 при установке не выполнялись. Эти результаты уточняют предыдущие записи
 «установка не выполнялась». Нового релиза и публикации нет.
+
+## Локальное объединение Reorder и Dock — 21 октября 2026
+
+В main перенесены три коммита этапов Taskbar Reorder (512804e, 80c687e, eb0e09a)
+с сохранением ранее интегрированного Dock. Конфликты CMake, Build-Local и Unreleased
+разрешены сохранением обоих наборов целей/записей; модуль Dock не заменялся.
+
+Свежая полная прямая сборка MSVC 14.42 / Qt 6.8.3 через Build-Local.ps1 прошла
+для объединённого GUI, native-модулей и fixtures. Прошли Reorder placement/planner,
+mock IPC, XAML layout-slot fixture в собственном offscreen tool HWND, Dock policy,
+mock DWM ownership и изолированный Dock model/persistence/QML fixture. Также прошли
+menu patch, policy, settings lifetime, geometry fixture с собственным HWND,
+diagnostics и обе PySide6-проверки конфигурации/навигации. Foundation и аудит
+объединённого staged index прошли; AGENTS.md отсутствует в индексе.
+
+Реальный Explorer, системная панель и установленная копия не изменялись.
+Полноценный Reorder не заявляется готовым: GUI по-прежнему разрешает прежний
+сценарий Task View, а новый layout-slot adapter используется только fixture.
+CMake presets, installer, подпись, VM и новые desktop/resource-проверки этого
+объединения не выполнялись; push/релиз не делались, нового CI-прогона нет.

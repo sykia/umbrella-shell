@@ -144,6 +144,15 @@ def main():
     root.commit(next_config); QTest.qWait(230)
     require(config() == applied and backend.drafts["one"] == applied, "failed operation saved/displayed")
     backend.apply_ok = True
+    # A deferred request must not apply to a panel after the user leaves it.
+    backend.busy = True
+    next_config = dict(applied); next_config["gap"] = 36
+    require(root.commit(next_config), "queued monitor-switch fixture refused")
+    calls_before = list(backend.calls)
+    root.setProperty("monitorIndex", 1); QTest.qWait(50)
+    backend.busy = False; backend.changed.emit(); QTest.qWait(240)
+    require(backend.calls == calls_before and backend.active == applied,
+            "monitor switch applied a deferred request to the previous panel")
     root.setProperty("monitorIndex",1); QTest.qWait(100)
     require(not root.property("nativeAvailable"),"secondary advertised native support")
     require(not root.moveComponent("taskview","left",1),"secondary move accepted")

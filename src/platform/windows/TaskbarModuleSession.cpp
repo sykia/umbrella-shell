@@ -21,7 +21,7 @@ bool TaskbarModuleSession::waitForLine(const QByteArray& expected) {
         while (host_.canReadLine()) {
             const auto line = host_.readLine(512).trimmed();
             if (line == expected) return true;
-            if (line.startsWith("error ") || line.startsWith("FAILED")) return false;
+            if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused") return false;
         }
         if (!host_.waitForReadyRead(static_cast<int>(3000 - elapsed.elapsed()))) return false;
     }

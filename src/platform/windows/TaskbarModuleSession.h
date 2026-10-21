@@ -13,6 +13,7 @@ public:
     bool stop(QString& error);
     bool positionTaskView(int x, QString& error, bool afterWidgets = false);
 private:
+    friend struct TaskbarModuleSessionTest;
     bool waitForLine(const QByteArray& expected);
     QProcess host_;
 };
