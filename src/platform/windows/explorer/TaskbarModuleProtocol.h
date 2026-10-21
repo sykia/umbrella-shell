@@ -63,18 +63,29 @@ struct ComponentSnapshotEntry {
     wchar_t layoutType[96]{};
     HRESULT layoutStatus = E_NOINTERFACE;
     std::int32_t modelIndex = -1;
+    wchar_t ownerType[96]{};
+    HRESULT ownerStatus = E_NOINTERFACE;
+    std::uint32_t ownerDepth{}, containerId{}, ownerId{}; // Snapshot-local, never pointers or persisted IDs.
     double x{}, y{}, width{}, height{};
     std::uint32_t visible{}, hitTestVisible{};
 };
 struct ComponentSnapshot {
-    std::uint32_t size = sizeof(ComponentSnapshot), version = 2;
+    std::uint32_t size = sizeof(ComponentSnapshot), version = 3;
     HRESULT status = E_FAIL;
     std::uint32_t count{}, visited{};
     ComponentSnapshotEntry entries[maxComponentSnapshot]{};
 };
 static_assert(sizeof(ComponentSnapshot) < 65536);
 inline bool validComponentSnapshot(const ComponentSnapshot& snapshot) noexcept {
-    return snapshot.size==sizeof(ComponentSnapshot) && snapshot.version==2 &&
-        snapshot.count<=maxComponentSnapshot && snapshot.visited<=512;
+    if (snapshot.size!=sizeof(ComponentSnapshot) || snapshot.version!=3 ||
+        snapshot.count>maxComponentSnapshot || snapshot.visited>512) return false;
+    for(unsigned i=0;i<snapshot.count;++i) {
+        const auto& entry=snapshot.entries[i];
+        if (SUCCEEDED(entry.ownerStatus)) {
+            if (entry.ownerDepth>=8 || entry.modelIndex<0 || !entry.ownerId || !entry.containerId ||
+                entry.ownerId>snapshot.count || entry.containerId>snapshot.count) return false;
+        } else if (entry.ownerDepth || entry.ownerId || entry.containerId || entry.modelIndex!=-1) return false;
+    }
+    return true;
 }
 }

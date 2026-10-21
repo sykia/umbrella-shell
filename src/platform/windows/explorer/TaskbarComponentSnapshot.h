@@ -27,6 +27,7 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
         std::vector<DependencyObject> pending{root};
         struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type; };
         std::vector<ParentLayout> layouts;
+        std::vector<FrameworkElement> owners;
         unsigned visited = 0;
         while (!pending.empty()) {
             if (++visited > 512) { result.status = E_ABORT; return result; }
@@ -44,19 +45,26 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                     if (parent) {
                         wcsncpy_s(entry.parentType, winrt::get_class_name(parent).c_str(), _TRUNCATE);
                         wcsncpy_s(entry.parentName, parent.Name().c_str(), _TRUNCATE);
-                        if (winrt::get_class_name(parent)==L"Microsoft.UI.Xaml.Controls.ItemsRepeater") {
-                            auto cached=std::find_if(layouts.begin(),layouts.end(),[&](const auto& value){return value.parent==parent;});
-                            if (cached==layouts.end()) {
-                                repeater::Value layout{nullptr};
-                                const HRESULT status=repeater::layout(parent,layout);
-                                layouts.push_back({parent,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{}});
-                                cached=std::prev(layouts.end());
-                            }
-                            entry.layoutStatus=cached->status;
-                            wcsncpy_s(entry.layoutType,cached->type.c_str(),_TRUNCATE);
-                            int index=-1;
-                            if (SUCCEEDED(repeater::elementIndex(parent,element,index))) entry.modelIndex=index;
+                    }
+                    repeater::Owner owner;
+                    entry.ownerStatus=repeater::owner(element,owner);
+                    if (SUCCEEDED(entry.ownerStatus)) {
+                        entry.ownerDepth=owner.depth;
+                        entry.modelIndex=owner.index;
+                        wcsncpy_s(entry.ownerType,winrt::get_class_name(owner.element).c_str(),_TRUNCATE);
+                        auto identity=std::find(owners.begin(),owners.end(),owner.element);
+                        if (identity==owners.end()) { owners.push_back(owner.element); identity=std::prev(owners.end()); }
+                        entry.ownerId=static_cast<unsigned>(identity-owners.begin())+1;
+                        auto cached=std::find_if(layouts.begin(),layouts.end(),[&](const auto& value){return value.parent==owner.container;});
+                        if (cached==layouts.end()) {
+                            repeater::Value layout{nullptr};
+                            const HRESULT status=repeater::layout(owner.container,layout);
+                            layouts.push_back({owner.container,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{}});
+                            cached=std::prev(layouts.end());
                         }
+                        entry.containerId=static_cast<unsigned>(cached-layouts.begin())+1;
+                        entry.layoutStatus=cached->status;
+                        wcsncpy_s(entry.layoutType,cached->type.c_str(),_TRUNCATE);
                     }
                     const auto box = element.TransformToVisual(root).TransformBounds(
                         {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});

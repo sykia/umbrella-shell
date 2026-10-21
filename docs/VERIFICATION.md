@@ -5,6 +5,18 @@
 
 ## Подтверждённые результаты
 
+Продолжение 21 октября, обнаружение владельцев: системный WinUI fixture прошёл
+прямой и вложенный model item (Button + индикатор внутри StackPanel/Border),
+перестановку целой исходной обёртки с актуальным model index, ближайшую границу
+вложенного ItemsRepeater, отказ для detached/null и более восьми родителей.
+Protocol tests проверили отказ v1/v2 у host v3, неверные owner IDs/depth/index и
+отсутствие пригодной привязки после отказа. Полная MSVC/Qt 6.8.3 сборка
+`Build-Local.ps1 -Output build/reorder-owner`, core reorder, placement, session,
+Dock isolated fixture и host `--fixture` прошли. Foundation и public index audit
+успешны.
+Это не desktop-проверка: новые снимки/переносы в Explorer не запускались;
+задержка native apply и ресурсы Explorer не измерялись.
+
 21 октября 2026, локальный этап логического Reorder: полная MSVC/Qt 6.8.3 сборка
 `Build-Local.ps1 -Output build/reorder-model` успешна. Core model-транзакция прошла
 отказы до/после всех шести операций перестановки четырёх объектов, восстановление

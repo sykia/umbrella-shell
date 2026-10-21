@@ -97,6 +97,10 @@ void exerciseRepeaterContract() {
         }
     };
     verify({0,1,2});
+    explorer::repeater::Owner resolved;
+    winrt::check_hresult(explorer::repeater::owner(originals[0],resolved));
+    require(resolved.container==instance && resolved.element==originals[0] && resolved.index==0 && resolved.depth==0,"Direct native model owner not resolved");
+    require(explorer::repeater::owner(nullptr,resolved)==E_INVALIDARG && !resolved.element && !resolved.container,"Null owner lookup retained a stale binding");
     const std::vector<explorer::repeater::Value> before{originals[0],originals[1],originals[2]};
     const std::vector<explorer::repeater::Value> after{originals[2],originals[0],originals[1]};
     const auto nativeVerify=[&](const auto& order) {
@@ -140,6 +144,47 @@ void exerciseRepeaterContract() {
     // a changed model, so this is not reported as transactional rollback.
     data.Clear(); for(const auto& item : before) data.Append(item);
     require(nativeVerify(before),"Owned fixture cleanup failed");
+    data.Clear();
+    Controls::Button nestedButton;
+    Controls::TextBlock glyph; glyph.Text(L"indicator");
+    Controls::StackPanel content;
+    content.Children().Append(nestedButton); content.Children().Append(glyph);
+    Controls::Border wrapper; wrapper.Child(content); wrapper.Width(80); wrapper.Height(48);
+    data.Append(wrapper); data.Append(arriving);
+    const std::vector<explorer::repeater::Value> nestedBefore{wrapper,arriving}, nestedAfter{arriving,wrapper};
+    require(nativeVerify(nestedBefore),"Nested native fixture did not realize");
+    winrt::check_hresult(explorer::repeater::owner(nestedButton,resolved));
+    require(resolved.container==instance && resolved.element==wrapper && resolved.index==0 && resolved.depth==2,"Nested button was confused with its owning model item");
+    explorer::repeater::Owner indicatorOwner;
+    winrt::check_hresult(explorer::repeater::owner(glyph,indicatorOwner));
+    require(indicatorOwner.element==resolved.element && indicatorOwner.index==resolved.index,"Indicator and original button assigned different model owners");
+    require(explorer::repeater::reorderOwnedModel(instance,data,nestedBefore,nestedAfter,nativeVerify)==Transaction::Applied,"Wrapped native component could not reorder as one object");
+    winrt::check_hresult(explorer::repeater::owner(nestedButton,resolved));
+    require(resolved.element==wrapper && resolved.index==1 && wrapper.Child()==content && content.Children().GetAt(0)==nestedButton && content.Children().GetAt(1)==glyph,"Wrapped reorder detached original content or retained stale index");
+    data.Clear();
+    explorer::repeater::Value nestedRepeater{nullptr}, nestedInner{nullptr};
+    winrt::check_hresult(reinterpret_cast<Create>(factoryTable[6])(creating.get(),nullptr,winrt::put_abi(nestedInner),winrt::put_abi(nestedRepeater)));
+    winrt::com_ptr<::IInspectable> nestedContract;
+    winrt::check_hresult(reinterpret_cast<::IUnknown*>(winrt::get_abi(nestedRepeater))->QueryInterface(explorer::repeater::itemsRepeaterId,nestedContract.put_void()));
+    auto** nestedTable=*reinterpret_cast<void***>(nestedContract.get());
+    auto nestedData=winrt::single_threaded_observable_vector<explorer::repeater::Value>();
+    Controls::Button innerButton; nestedData.Append(innerButton);
+    winrt::check_hresult(reinterpret_cast<PutSource>(nestedTable[7])(nestedContract.get(),winrt::get_abi(nestedData)));
+    Controls::Border shell; shell.Child(nestedRepeater.as<FrameworkElement>()); data.Append(shell);
+    require(nativeVerify(std::vector<explorer::repeater::Value>{shell}),"Outer repeater did not realize nested model");
+    explorer::repeater::Value innerRealized{nullptr};
+    winrt::check_hresult(reinterpret_cast<Realize>(nestedTable[21])(nestedContract.get(),0,winrt::put_abi(innerRealized)));
+    winrt::check_hresult(explorer::repeater::owner(innerButton,resolved));
+    require(resolved.container==nestedRepeater && resolved.element==innerButton && resolved.index==0,"Nested repeater boundary crossed into outer model");
+    data.Clear();
+    Controls::Button deepButton;
+    UIElement deep=deepButton;
+    for(unsigned i=0;i<9;++i) { Controls::Border layer; layer.Child(deep); deep=layer; }
+    data.Append(deep);
+    require(nativeVerify(std::vector<explorer::repeater::Value>{deep}),"Deep native fixture did not realize");
+    require(explorer::repeater::owner(deepButton,resolved)==E_BOUNDS && !resolved.element && !resolved.container,"Unbounded ancestry or stale owner accepted");
+    Controls::Button detached;
+    require(FAILED(explorer::repeater::owner(detached,resolved)) && !resolved.element,"Detached element acquired a native owner");
     source.Content(nullptr); source.Close();
     std::cout << "Passed: actual WinUI 2 model reorder/restore, original UIElement identities and native model indices in an owned source.\n";
     std::cout << "Passed: actual system WinUI 2 ItemsRepeater public layout/index contract; no Explorer attachment.\n";

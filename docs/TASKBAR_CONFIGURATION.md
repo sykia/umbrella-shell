@@ -25,14 +25,22 @@ Fixture системного ItemsRepeater использует именно э�
 а не скрытый rollback. Изменяемый интерфейс ItemsSource Explorer не является
 разрешением на запись: для него по-прежнему нужен подтверждённый контракт владения.
 
-`--inspect-components` теперь выдаёт snapshot version=2: у непосредственных детей
-WinUI 2 ItemsRepeater добавлены настоящий runtime-класс Layout, HRESULT доступа
-и modelIndex. Доступ идёт через QueryInterface публичного versioned IItemsRepeater,
+`--inspect-components` теперь выдаёт snapshot version=3: для компонентов,
+включая вложенные в обёртки, добавлены настоящий runtime-класс Layout, HRESULT
+доступа и modelIndex. Доступ идёт через QueryInterface публичного versioned IItemsRepeater,
 без новых RVA, изменения vtable, модели или родителя. Один Layout читается один раз
 на parent в пределах снимка. Отрицательный index означает, что элемент не признан
 реализованным элементом этой модели; это не позиция для автоматической записи.
 Host и module для диагностики должны происходить из одной сборки. Edit ABI Task View
 не изменился; проверки системных DLL сохранены.
+
+Поиск проходит не более восьми visual parents в текущем XamlRoot и останавливается
+на ближайшем IItemsRepeater. Он возвращает исходный элемент модели, а не внутреннюю
+кнопку/glyph. Нереализованный элемент ближайшей модели не приписывается внешнему
+repeater. Snapshot-local containerId/ownerId связывают компоненты с общими владельцами;
+они не являются адресами процесса или устойчивыми ключами для INI. ownerDepth,
+ownerType и ownerStatus объясняют результат. Protocol v1/v2 и некорректные owner IDs,
+индексы или глубина отклоняются host до использования. Снимок не меняет модель.
 
 В отдельном процессе fixture активирует системный WinUI 2 CBS ItemsRepeater,
 подключает собственную observable-модель трёх оригинальных UIElement и проверяет

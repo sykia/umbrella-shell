@@ -147,7 +147,7 @@ native-host, без изменения существующего edit ABI. Comp
 не получают выдуманных persistent AppID. Снимок ограничен 512 посещениями и 48
 записями, содержит фактического visual parent, геометрию и hit-test, не сохраняет
 XAML-ссылок и не включает polling. Обнаружение не даёт разрешения на перемещение.
-Snapshot v2 дополнительно читает WinUI 2 Layout и model index через публичный
+Snapshot v3 дополнительно читает WinUI 2 Layout и model index через публичный
 versioned IItemsRepeater (без patching vtable/RVA); getter Layout кэшируется по
 parent только до завершения запроса. Прямой контракт проверен на системном CBS
 ItemsRepeater в отдельном fixture, включая перестановку/возврат его собственной

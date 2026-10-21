@@ -109,10 +109,12 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
             if (!entry.id[0]) continue;
             entry.id[23] = entry.type[95] = entry.parentType[95] = entry.parentName[79] = 0;
             entry.layoutType[95]=0;
+            entry.ownerType[95]=0;
             std::printf("  %ls type=%ls parent=%ls/%ls bounds=(%.1f,%.1f,%.1f,%.1f) visible=%u hit=%u movement=unverified\n",
                 entry.id, entry.type, entry.parentType, entry.parentName, entry.x, entry.y, entry.width, entry.height,
                 entry.visible, entry.hitTestVisible);
             std::printf("    layout=%ls status=%08lx modelIndex=%d\n",entry.layoutType,static_cast<unsigned long>(entry.layoutStatus),entry.modelIndex);
+            std::printf("    owner=%ls status=%08lx depth=%u containerId=%u ownerId=%u\n",entry.ownerType,static_cast<unsigned long>(entry.ownerStatus),entry.ownerDepth,entry.containerId,entry.ownerId);
         }
         reportReceived = true;
         return TRUE;
