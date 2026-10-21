@@ -13,14 +13,17 @@
   и лишние model notifications. Добавлены соответствующие регрессионные проверки.
 - Выполнена свежая прямая сборка MSVC 14.42 / Qt 6.8.3 через Build-Local, затем
   адресная пересборка. Output: `build/dock-resume-1`.
-- Offscreen Taskbar live/navigation проверки прошли. Foundation и staged audit
-  проверяются перед коммитом. Измерения синтетической модели записаны отдельно
+- Повторная свежая сборка: `build/dock-resume-2`. Три Dock test executables
+  (policy, mock DWM lifecycle/error paths, isolated model/persistence/QML) прошли
+  из этого output. Дополнительно прошли update policy и mock menu patch tests.
+- Offscreen Taskbar live/navigation проверки повторно прошли. Foundation прошёл;
+  staged audit проверяется перед коммитом. Измерения синтетической модели записаны отдельно
   в TASKBAR_DOCK.md; не считать их CPU/RAM/GPU показателями настоящего Dock.
 
 Для свежей сборки (Output должен отсутствовать):
 
 ```powershell
-./scripts/Build-Local.ps1 -ToolsRoot '../Umbrella Shell/tmp/native-tools' -QtRoot '../Umbrella Shell/tmp/qt-sdk' -Output 'build/dock-resume-2'
+./scripts/Build-Local.ps1 -ToolsRoot '../Umbrella Shell/tmp/native-tools' -QtRoot '../Umbrella Shell/tmp/qt-sdk' -Output 'build/dock-resume-3'
 ```
 
 Для fixtures добавить Qt SDK bin в PATH; QT_QPA_FONTDIR можно направить на
