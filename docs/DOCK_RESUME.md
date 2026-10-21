@@ -1,65 +1,49 @@
-# Umbrella Dock — сохранённая точка продолжения
+# Umbrella Dock — точка продолжения
 
-Разработка приостановлена по просьбе владельца перед выключением ПК.
-Ветка: `agents/umbrella-dock`, worktree: `umbrella-dock`.
-Первый проверенный этап: `9296f5df03b2f56e1fef0280488e08c71bac1c45`.
-Последующий WIP содержит расширения; не считать его полностью проверенным.
+Разработка возобновлена 2026-10-21 с `f14f4b315846e3f15f69bb48d57bccd596237271`.
+Ветка: `agents/umbrella-dock`, worktree: `umbrella-dock`. Полный перечень
+возможностей и ограничений: [TASKBAR_DOCK.md](TASKBAR_DOCK.md).
 
-## Реализовано
+## Подтверждённое состояние
 
-Отдельные Qt Quick Dock-окна в существующем процессе, четвёртый режим и страница
-настроек, логотип Umbrella, событийные WinEvent hooks, worker снимков/значков,
-группы окон, активация/сворачивание/закрытие, закрепления и их порядок, частичный
-импорт Windows, packaged AUMID/AppsFolder, настройки темы/геометрии/автоскрытия,
-профили устойчивых ID мониторов, плавное скрытие, общий компонент живого превью.
-Совместимый режим сохраняет системную панель и native/Reorder-конфигурацию.
+- Сохранённые перед выключением policy/model/QML fixtures повторно прошли.
+- Добавлены включаемые DWM-миниатюры с выбором/закрытием окна и освобождением
+  ресурсов. Mock DWM API проверяет lifecycle и ошибки без desktop HWND.
+- Исправлены стабильный порядок нескольких окон, повторное создание COM apartment
+  и лишние model notifications. Добавлены соответствующие регрессионные проверки.
+- Выполнена свежая прямая сборка MSVC 14.42 / Qt 6.8.3 через Build-Local, затем
+  адресная пересборка. Output: `build/dock-resume-1`.
+- Offscreen Taskbar live/navigation проверки прошли. Foundation и staged audit
+  проверяются перед коммитом. Измерения синтетической модели записаны отдельно
+  в TASKBAR_DOCK.md; не считать их CPU/RAM/GPU показателями настоящего Dock.
 
-## Что проверено и что ещё не проверено
+Для свежей сборки (Output должен отсутствовать):
 
-Прямая MSVC 14.42 / Qt 6.8.3 сборка проходила. Dock policy/model/persistence/QML
-fixtures, существующие offscreen Taskbar live/navigation тесты и визуальные
-software-render снимки проходили до последнего изменения сопоставления AUMID/EXE.
-Последняя адресная сборка завершилась с кодом 0 (`build-dock-verified.log`), но
-после неё тесты ещё НЕ повторены: владелец запросил остановку.
+```powershell
+./scripts/Build-Local.ps1 -ToolsRoot '../Umbrella Shell/tmp/native-tools' -QtRoot '../Umbrella Shell/tmp/qt-sdk' -Output 'build/dock-resume-2'
+```
 
-Последние изменения требуют первой перепроверки: симметричное сопоставление
-закреплённого EXE и окна с AUMID, очистка transient-модели при отключении Dock,
-сообщения об отказе оконных действий. Дополнительно проверить обработку ошибки
-создания графики и отчёт startup-status; эти ветви не испытаны на реальном GPU.
+Для fixtures добавить Qt SDK bin в PATH; QT_QPA_FONTDIR можно направить на
+системный Fonts. После windeployqt нужен SDK platforms/qoffscreen.dll либо
+QT_QPA_PLATFORM_PLUGIN_PATH. Запускать `umbrella_dock_policy_tests.exe`,
+`umbrella_dock_thumbnail_tests.exe`, `umbrella_dock_fixture_tests.exe`.
+Отдельный `--benchmark` запускает только синтетическую модель без desktop/RHI.
 
-Development output: `build/dock-check-6`. windeployqt скопировал Qt; translations
-выдали предупреждение. Добавлен SDK qoffscreen.dll для изолированного fixture.
-Deployed diagnostics и offscreen fixture с системным PATH проходили до последних
-изменений. Offscreen backend сообщал о каталоге fonts; реальный Windows font/DWM
-backend этим не проверяется. Установленная Umbrella не заменялась.
+## Далее
 
-Не выполнены CMake presets/CTest, реальный GUI/D3D11 smoke нового Dock,
-desktop/mixed-DPI/hotplug/Explorer restart/login/installer проверки и измерения
-CPU/RAM/GPU. DWM-миниатюры окон пока не реализованы. Точный системный pin-order и
-полная синхронизация Windows pins публичным API не предоставляются.
+1. Проверить фактические DWM preview и graphics failure paths в контролируемой
+   интеграционной среде. Mock fixtures не доказывают отображение native thumbnail.
+2. Проверить совместное автоскрытие со штатным Taskbar, два монитора 2560×1440,
+   mixed DPI, hotplug/primary switch, packaged apps, Explorer restart и login.
+3. Измерить реальные CPU/RAM/GPU в простое/наведении/анимациях и при множестве окон;
+   проверить освобождение ресурсов и latency Shell API при завершении.
+4. Выполнить CMake presets/CTest и installer/VM проверки там, где доступны инструменты.
 
-## Следующий шаг
+Во время параллельной разработки реальные desktop-тесты остаются запрещёнными.
+Установленная Umbrella, пользовательские приложения и Explorer не изменялись.
+Push, merge, установка и релиз не выполнялись.
 
-1. Прочитать этот файл и `docs/TASKBAR_DOCK.md`; проверить branch/status.
-2. Повторить Dock fixtures после последней сборки. После deployment тестовой
-   платформе нужен `platforms/qoffscreen.dll` либо QT_QPA_PLATFORM_PLUGIN_PATH из
-   того же Qt SDK. Не запускать основной GUI рядом с установленным владельцем.
-3. Для воспроизводимой свежей сборки использовать отслеживаемый скрипт:
-
-   ```powershell
-   ./scripts/Build-Local.ps1 -ToolsRoot '../Umbrella Shell/tmp/native-tools' -QtRoot '../Umbrella Shell/tmp/qt-sdk' -Output 'build/dock-resume-1'
-   ```
-
-   Output должен отсутствовать. Локальные адресные helper-скрипты находятся в
-   игнорируемом `tmp/`, но не требуются для воспроизведения сборки.
-4. Проверить оставшиеся требования, особенно миниатюры, надёжность автоскрытия и
-   совместное поведение со штатным автоскрытием Taskbar. Реальные desktop/resource
-   испытания выполнять только в согласованной интеграционной сессии: параллельные
-   агенты не должны одновременно менять рабочий стол.
-5. После проверок обновить ограничения и создать следующий обычный локальный
-   коммит. Не делать push, merge, установку или релиз без нового указания владельца.
-
-Изменяемые общие файлы: CMakeLists.txt, src/app/main.cpp, Settings.qml,
-TaskbarPage.qml, scripts/Build-Local.ps1, tests/taskbar_live_ui_test.py и общая
-документация. TaskbarSettings/TaskbarRuntime API не изменены. Возможны конфликты
-интеграции в composition root, QML-навигации и сборке. Новых агентов не создавать.
+Общие точки интеграции: CMakeLists.txt, src/app/main.cpp, Settings.qml,
+TaskbarPage.qml, scripts/Build-Local.ps1, tests/taskbar_live_ui_test.py и документация.
+TaskbarSettings/TaskbarRuntime API не изменены. `dockSystem.enabled` обозначает
+совместимый Dock, а не эксклюзивное управление системной панелью.

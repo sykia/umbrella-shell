@@ -36,6 +36,7 @@ public:
     static bool launch(const DockApp& app);
     static bool activate(const DockWindow& window, bool minimizeActive);
     static bool close(const DockWindow& window);
+    static bool current(const DockWindow& window);
     static QVariantMap theme();
     static bool backdrop(QWindow& window, bool enabled, bool dark);
     bool nativeEventFilter(const QByteArray&, void*, qintptr*) override;

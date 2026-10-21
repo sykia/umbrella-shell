@@ -90,7 +90,7 @@ DockApp packagedApp(const QString& aumid) {
     return app;
 }
 bool eligible(HWND hwnd) {
-    if (!IsWindow(hwnd) || !IsWindowVisible(hwnd) || GetWindow(hwnd, GW_OWNER)) return false;
+    if (!IsWindow(hwnd) || !IsWindowVisible(hwnd) || GetAncestor(hwnd,GA_ROOT)!=hwnd || GetWindow(hwnd, GW_OWNER)) return false;
     const auto style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
     if ((style & WS_EX_TOOLWINDOW) && !(style & WS_EX_APPWINDOW)) return false;
     DWORD pid = 0; GetWindowThreadProcessId(hwnd, &pid);
@@ -132,7 +132,15 @@ struct DockWindows::Impl {
 DockWindows::DockWindows(QObject* parent) : QObject(parent), impl_(std::make_unique<Impl>()) {
     impl_->com = SUCCEEDED(RoInitialize(RO_INIT_SINGLETHREADED));
 }
-DockWindows::~DockWindows() { stop(); if (impl_->com) RoUninitialize(); }
+DockWindows::~DockWindows() {
+    stop();
+    if(impl_->com) {
+        // UISettings activation factories are cached by this module on the GUI
+        // thread. Release them before its apartment can disappear and be recreated.
+        winrt::clear_factory_cache();
+        RoUninitialize();
+    }
+}
 bool DockWindows::start() {
     if (!impl_->hooks.isEmpty()) return true;
     if (owner && owner != this) return false;
@@ -305,6 +313,7 @@ bool DockWindows::close(const DockWindow& window) {
     const auto hwnd = reinterpret_cast<HWND>(window.handle);
     return sameWindow(window) && PostMessageW(hwnd,WM_CLOSE,0,0);
 }
+bool DockWindows::current(const DockWindow& window) { return sameWindow(window); }
 QVariantMap DockWindows::theme() {
     QColor background(Qt::white), foreground(Qt::black), accent(0,120,215);
     bool animations = true, transparency = false;

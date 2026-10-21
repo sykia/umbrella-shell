@@ -11,9 +11,43 @@
 #include <QDir>
 #include <QEventLoop>
 #include <cstdlib>
+#include <QElapsedTimer>
+#include <Windows.h>
+#include <psapi.h>
 
 void require(bool value, const char* message) { if (!value) { QTextStream(stderr) << message << '\n'; std::exit(1); } }
 struct DockFixture {
+    static void benchmark() {
+        DockController model;model.pins_.clear();model.reconcile({});
+        QList<umbrella::platform::DockApp> apps;
+        for(int i=0;i<64;++i) {
+            umbrella::platform::DockApp app;app.id=QString("benchmark:%1").arg(i);app.aumid=app.id;app.title="Synthetic application";
+            app.icon=QImage(64,64,QImage::Format_ARGB32_Premultiplied);app.icon.fill(Qt::blue);apps.append(app);
+        }
+        QList<umbrella::platform::DockWindow> windows;
+        for(int i=0;i<512;++i) {
+            umbrella::platform::DockWindow window;window.handle=1000+i;window.app=apps[i%64];window.title=QString("Synthetic window %1").arg(i);windows.append(window);
+        }
+        model.reconcile(windows);
+        QElapsedTimer timer;timer.start();
+        for(int i=0;i<100;++i) {
+            for(int n=0;n<windows.size();++n) windows[n].active=n==i%512;
+            model.reconcile(windows);
+        }
+        const double mean=timer.nsecsElapsed()/1000000.0/100;
+        auto cpu=[] {
+            FILETIME creation{},exit{},kernel{},user{};require(GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernel,&user),"Process CPU query");
+            return ((static_cast<quint64>(kernel.dwHighDateTime)<<32)|kernel.dwLowDateTime)+((static_cast<quint64>(user.dwHighDateTime)<<32)|user.dwLowDateTime);
+        };
+        const auto initialCpu=cpu();timer.restart();
+        QEventLoop idle;QTimer::singleShot(1000,&idle,&QEventLoop::quit);idle.exec();
+        const auto idleWall=timer.elapsed();const double idleCpu=(cpu()-initialCpu)/10000.0;
+        PROCESS_MEMORY_COUNTERS_EX memory{};memory.cb=sizeof(memory);
+        require(GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)),"Process memory query");
+        QTextStream(stdout)<<"BENCHMARK synthetic model only; no WinEvent/DWM/D3D11: windows=512 groups="<<model.rowCount()
+            <<" meanReconcileMs="<<mean<<" idleWallMs="<<idleWall<<" idleCpuMs="<<idleCpu
+            <<" workingSetMiB="<<memory.WorkingSetSize/1048576.0<<" privateMiB="<<memory.PrivateUsage/1048576.0<<'\n';
+    }
     static void run(const QString& directory) {
         DockController model;
         require(!model.enabled(),"Constructing a model must not activate desktop integration");
@@ -36,6 +70,24 @@ struct DockFixture {
         require(model.rowCount()==3,"Transient application absent");
         require(model.entries_[1].windows.size()==2,"Windows not grouped with pinned app");
         require(model.data(model.index(1),DockController::Active).toBool(),"Active group lost");
+        int notifications=0;
+        const auto observed=QObject::connect(&model,&QAbstractItemModel::dataChanged,&model,[&] { ++notifications; });
+        auto moved=one;moved.rect=QRect(100,100,800,600);
+        model.reconcile({moved,two,transient});
+        require(notifications==0,"Geometry-only snapshot unnecessarily invalidated app delegates");
+        auto renamed=one;renamed.title="Renamed window";
+        model.reconcile({renamed,two,transient});
+        require(notifications==1,"Title change did not target only its application group");
+        QObject::disconnect(observed);
+        auto three=two;three.handle=126;three.title="Third window";
+        model.reconcile({one,two,three});
+        model.reconcile({three,one,two});
+        const auto ordered=model.entries_[1].windows;
+        require(ordered.size()==3 && ordered[0].handle==123 && ordered[1].handle==124 && ordered[2].handle==126,"Z-order changed the application's cycling order");
+        model.configure("previews",true);
+        model.requestPreview(first.id,"fixture-monitor",0,0,48,48);
+        require(!model.previewShowTimer_.isActive() && !model.preview_.visible(),"Disabled Dock created desktop preview resources");
+        model.configure("previews",false);
         model.reconcile({two});
         require(model.rowCount()==2 && !model.data(model.index(1),DockController::Active).toBool(),"Closed app/foreground reconciliation");
         model.configure("iconSize",9000); require(model.config()["iconSize"].toInt()==48,"Invalid geometry accepted");
@@ -101,6 +153,11 @@ int main(int argc,char** argv) {
     QGuiApplication app(argc,argv);
     QTemporaryDir directory; require(directory.isValid(),"Temporary profile");
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,directory.path());
+    if(app.arguments().contains("--benchmark")) { DockFixture::benchmark();return 0; }
     DockFixture::run(directory.path());
+    for(int i=0;i<3;++i) {
+        DockController recreated;
+        require(!recreated.enabled() && !recreated.theme().isEmpty(),"Repeated model/apartment lifecycle");
+    }
     QTextStream(stdout)<<"Dock isolated model, persistence and QML fixture passed\n";
 }

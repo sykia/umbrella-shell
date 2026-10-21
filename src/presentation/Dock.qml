@@ -150,9 +150,18 @@ Item {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
                     property real pressX: 0
                     property real pressY: 0
-                    onEntered: root.hoverIndex = app.index
-                    onExited: if (root.hoverIndex === app.index) root.hoverIndex = -100
-                    onPressed: function(mouse) { pressX=mouse.x; pressY=mouse.y }
+                    onEntered: {
+                        root.hoverIndex = app.index
+                        if(!root.preview && root.options.previews) {
+                            const point=app.mapToItem(root,0,0)
+                            dockSystem.requestPreview(app.identity,root.screenName,point.x,point.y,app.width,app.height)
+                        }
+                    }
+                    onExited: {
+                        if(root.hoverIndex === app.index) root.hoverIndex = -100
+                        if(!root.preview) dockSystem.cancelPreview(app.identity)
+                    }
+                    onPressed: function(mouse) { pressX=mouse.x; pressY=mouse.y; if(!root.preview) dockSystem.dismissPreview() }
                     onReleased: function(mouse) {
                         if (root.preview) return
                         if (mouse.button !== Qt.LeftButton || !app.pinned) return
@@ -174,7 +183,7 @@ Item {
                 }
                 ToolTip {
                     popupType:Popup.Window
-                    visible:appMouse.containsMouse && !root.menuOpen && !appMouse.pressed && !root.concealed
+                    visible:appMouse.containsMouse && !root.menuOpen && !appMouse.pressed && !root.concealed && !root.options.previews
                     delay:700; text:app.appTitle + (app.windowCount>1 ? " · " + app.windowCount + " окна" : "")
                     x:root.vertical ? (root.options.edge==="left" ? app.width+8 : -width-8) : (app.width-width)/2
                     y:root.vertical ? (app.height-height)/2 : root.options.edge==="top" ? app.height+8 : -height-8

@@ -19,5 +19,18 @@ int main() {
     require(shouldHide(2,false,false,true,false,true),"Smart hide overlap");
     const auto physical=physicalRect({-1200,100,400,80},{-1707,0,1707,960},{-2560,0,2560,1440},1.5);
     require(physical.x==-1799 && physical.y==150 && physical.width==600 && physical.height==120,"Mixed DPI/negative origin conversion");
+    for(const Rect work:{Rect{-2560,-300,2560,1440},Rect{0,0,640,480},Rect{0,0,64,48},Rect{0,0,1,1}})
+        for(const auto edge:{Edge::bottom,Edge::top,Edge::left,Edge::right})
+            for(const double scale:{1.,1.25,1.5,2.,4.}) for(const int count:{1,3,8,100}) {
+                const auto layout=previewLayout(work,{work.x,work.y,48,48},edge,count,scale);
+                const auto r=layout.bounds;
+                require(r.x>=work.x && r.y>=work.y && r.x+r.width<=work.x+work.width && r.y+r.height<=work.y+work.height,"Preview escaped work area");
+                require(layout.count>0 && layout.count<=8,"Preview count bound");
+                require(previewHitTest(layout,-1,layout.header)==-1 && previewHitTest(layout,0,r.height)==-1,"Preview hit-test accepted outside input");
+                for(int i=0;i<layout.count;++i) {
+                    const auto cell=layout.cell(i);
+                    require(previewHitTest(layout,cell.x+cell.width/2,cell.y+cell.height/2)==i,"Preview window selection mismatch");
+                }
+            }
     std::cout << "Dock policy invariants passed\n";
 }

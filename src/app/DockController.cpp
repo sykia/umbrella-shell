@@ -23,7 +23,7 @@ QVariantMap defaults() {
     return {{"edge","bottom"},{"alignment",1},{"margin",10},{"iconSize",48},{"spacing",8},{"radius",18},
         {"opacity",85},{"blur",true},{"indicators",true},{"magnification",20},{"hideMode",0},{"hideDelay",600},
         {"revealDelay",180},{"hideFullscreen",true},{"animations",true},{"speed",100},{"allScreens",false},
-        {"screen",QString{}},{"showRunning",true},{"theme","auto"},{"shadows",true}};
+        {"screen",QString{}},{"showRunning",true},{"theme","auto"},{"shadows",true},{"previews",false}};
 }
 bool validate(const QString& key, const QVariant& value) {
     const QHash<QString,QPair<int,int>> ranges{{"alignment",{0,2}},{"margin",{0,80}},{"iconSize",{24,80}},
@@ -33,13 +33,21 @@ bool validate(const QString& key, const QVariant& value) {
     if (key == "edge") return QStringList{"bottom","top","left","right"}.contains(value.toString());
     if (key == "theme") return QStringList{"auto","light","dark"}.contains(value.toString());
     if (key == "screen") return value.toString().size() <= 128;
-    return QStringList{"blur","indicators","hideFullscreen","animations","allScreens","showRunning","shadows"}.contains(key) && value.metaType().id() == QMetaType::Bool;
+    return QStringList{"blur","indicators","hideFullscreen","animations","allScreens","showRunning","shadows","previews"}.contains(key) && value.metaType().id() == QMetaType::Bool;
 }
 QString token(const umbrella::platform::DockWindow& window) {
     return QString("%1:%2:%3").arg(window.handle).arg(window.processId).arg(window.processCreated);
 }
 bool matches(const DockApp& app, const DockApp& window) {
     return app.id==window.id || ((window.aumid.isEmpty() || app.aumid.isEmpty()) && !app.executable.isEmpty() && app.executable.compare(window.executable,Qt::CaseInsensitive)==0);
+}
+bool samePresentedWindows(const QList<umbrella::platform::DockWindow>& a,const QList<umbrella::platform::DockWindow>& b) {
+    if(a.size()!=b.size()) return false;
+    for(int i=0;i<a.size();++i) {
+        if(a[i].handle!=b[i].handle || a[i].processId!=b[i].processId || a[i].processCreated!=b[i].processCreated ||
+           a[i].title!=b[i].title || a[i].screen!=b[i].screen || a[i].active!=b[i].active) return false;
+    }
+    return true;
 }
 class Icons final : public QQuickImageProvider {
 public:
@@ -60,12 +68,12 @@ struct DockController::Surface {
     QTimer* timer = nullptr;
     QTimer* fadeTimer = nullptr;
     QRect shown;
-    bool hidden = false, hovered = false, menu = false, wantHidden = false;
+    bool hidden = false, hovered = false, menu = false, wantHidden = false, preview = false;
     bool concealed = false;
     int backdropState = -1;
     QVariantMap appliedOptions;
 };
-DockController::DockController(QObject* parent) : QAbstractListModel(parent), source_(this), config_(defaults()), theme_(DockWindows::theme()) {
+DockController::DockController(QObject* parent) : QAbstractListModel(parent), source_(this), preview_(this), config_(defaults()), theme_(DockWindows::theme()) {
     QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
     const auto bytes = saved.value("dock/configV1").toByteArray();
     if (bytes.size() <= 32768) {
@@ -110,6 +118,19 @@ DockController::DockController(QObject* parent) : QAbstractListModel(parent), so
     refreshTimer_.setInterval(90); refreshTimer_.setSingleShot(true);
     persistenceTimer_.setInterval(180); persistenceTimer_.setSingleShot(true);
     connect(&persistenceTimer_,&QTimer::timeout,this,&DockController::save);
+    previewShowTimer_.setSingleShot(true); previewShowTimer_.setInterval(500);
+    previewHideTimer_.setSingleShot(true); previewHideTimer_.setInterval(180);
+    connect(&previewShowTimer_,&QTimer::timeout,this,&DockController::showPendingPreview);
+    connect(&previewHideTimer_,&QTimer::timeout,this,&DockController::dismissPreview);
+    connect(&preview_,&umbrella::platform::DockPreview::hovered,this,[this](bool inside) {
+        if(!enabled_ || rebuilding_) return;
+        previewHovered_=inside;
+        if(inside) previewHideTimer_.stop(); else previewHideTimer_.start();
+    });
+    connect(&preview_,&umbrella::platform::DockPreview::activated,this,[this](const auto& window) {
+        const auto handle=token(window); dismissPreview(); activateWindow(handle);
+    });
+    connect(&preview_,&umbrella::platform::DockPreview::closeRequested,this,[this](const auto& window) { closeWindow(token(window)); });
     connect(&source_,&DockWindows::windowsChanged,this,[this] { if (!refreshTimer_.isActive()) refreshTimer_.start(); });
     connect(&refreshTimer_,&QTimer::timeout,this,&DockController::refresh);
     connect(&source_,&DockWindows::snapshotReady,this,[this](const auto& snapshot) { if (enabled_) reconcile(snapshot); });
@@ -135,7 +156,7 @@ DockController::DockController(QObject* parent) : QAbstractListModel(parent), so
     });
     reconcile({}); // Read saved pins without starting hooks, timers or desktop integration.
 }
-DockController::~DockController() { if (persistenceTimer_.isActive()) save(); enabled_ = false; surfaces_.clear(); source_.stop(); }
+DockController::~DockController() { if (persistenceTimer_.isActive()) save(); enabled_ = false; dismissPreview(); surfaces_.clear(); source_.stop(); }
 void DockController::attachEngine(QQmlEngine& engine) { engine.addImageProvider("dock",new Icons(this)); }
 int DockController::rowCount(const QModelIndex& parent) const { return parent.isValid() ? 0 : static_cast<int>(entries_.size()); }
 QHash<int,QByteArray> DockController::roleNames() const { return {{Identity,"identity"},{Title,"appTitle"},{Icon,"iconSource"},{Pinned,"pinned"},{Count,"windowCount"},{Active,"appActive"},{Windows,"appWindows"}}; }
@@ -145,7 +166,7 @@ QVariant DockController::data(const QModelIndex& index, int role) const {
     switch (role) {
     case Identity: return entry.app.id;
     case Title: return entry.app.title;
-    case Icon: return entry.app.icon.isNull() ? QString{} : QString("image://dock/%1/%2").arg(row).arg(qHash(entry.app.id));
+    case Icon: return entry.app.icon.isNull() ? QString{} : QString("image://dock/%1/%2/%3").arg(row).arg(qHash(entry.app.id)).arg(entry.app.icon.cacheKey());
     case Qt::UserRole+100: return entry.app.icon;
     case Pinned: return entry.pinned;
     case Count: return entry.windows.size();
@@ -191,7 +212,7 @@ bool DockController::setEnabled(bool enabled) {
         if (!umbrella::platform::TaskbarRuntime::setLoginResume(true)) report(QStringLiteral("Dock работает, но автозапуск записать не удалось."));
         else report(QStringLiteral("Dock включён в совместимом режиме. Пуск, трей и приложения Windows остаются доступны на системной панели."));
     } else {
-        surfaces_.clear(); refreshTimer_.stop(); source_.stop(); reconcile({});
+        dismissPreview(); surfaces_.clear(); refreshTimer_.stop(); source_.stop(); reconcile({});
         QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
         if (!saved.value("resumeAppearance",false).toBool()) umbrella::platform::TaskbarRuntime::setLoginResume(false);
         report(QStringLiteral("Dock выключен. Настройки системной панели сохранены."));
@@ -201,6 +222,7 @@ bool DockController::setEnabled(bool enabled) {
 void DockController::configure(const QString& key, const QVariant& value) {
     if (!validate(key,value) || config_.value(key) == value) return;
     config_[key] = value; persistenceTimer_.start(); emit configChanged();
+    if(key=="previews" && !value.toBool()) dismissPreview();
     if (enabled_) {
         if (key == "allScreens" || key == "screen") rebuildSurfaces();
         else { if (key == "showRunning") refresh(); layoutSurfaces(); }
@@ -301,6 +323,7 @@ void DockController::refresh() {
     else reconcile({});
 }
 void DockController::reconcile(const QList<umbrella::platform::DockWindow>& windows) {
+    bool structuralChange=false;
     windowSnapshot_ = windows;
     QList<Entry> wanted;
     for (const auto& pin : pins_) wanted.append({pin,{},true});
@@ -320,25 +343,38 @@ void DockController::reconcile(const QList<umbrella::platform::DockWindow>& wind
         it->windows.append(window);
         if (it->app.icon.isNull()) it->app.icon = window.app.icon;
     }
+    for(auto& group:wanted) {
+        const auto previous=std::find_if(entries_.begin(),entries_.end(),[&](const auto& entry) { return entry.app.id==group.app.id; });
+        if(previous==entries_.end()) continue;
+        QHash<QString,int> order;
+        for(int i=0;i<previous->windows.size();++i) order.insert(token(previous->windows[i]),i);
+        std::stable_sort(group.windows.begin(),group.windows.end(),[&](const auto& a,const auto& b) {
+            return order.value(token(a),512)<order.value(token(b),512);
+        });
+    }
     for (int i = static_cast<int>(entries_.size())-1; i >= 0; --i) {
         if (std::none_of(wanted.begin(),wanted.end(),[&](const auto& w){ return w.app.id == entries_[i].app.id; })) {
-            beginRemoveRows({},i,i); entries_.removeAt(i); endRemoveRows();
+            beginRemoveRows({},i,i); entries_.removeAt(i); endRemoveRows();structuralChange=true;
         }
     }
     for (int i = 0; i < wanted.size(); ++i) {
         int found = i;
         while (found < entries_.size() && entries_[found].app.id != wanted[i].app.id) ++found;
-        if (found == entries_.size()) { beginInsertRows({},i,i); entries_.insert(i,wanted[i]); endInsertRows(); }
-        else if (found != i) { beginMoveRows({},found,found,{},i); entries_.move(found,i); endMoveRows(); }
-        const auto beforeWindows = data(index(i),Windows); const auto beforePinned = entries_[i].pinned;
+        if (found == entries_.size()) { beginInsertRows({},i,i); entries_.insert(i,wanted[i]); endInsertRows();structuralChange=true; }
+        else if (found != i) { beginMoveRows({},found,found,{},i); entries_.move(found,i); endMoveRows();structuralChange=true; }
+        const bool presentedChanged=!samePresentedWindows(entries_[i].windows,wanted[i].windows) || entries_[i].pinned!=wanted[i].pinned;
+        const bool iconChanged=entries_[i].app.icon.cacheKey()!=wanted[i].app.icon.cacheKey();
         entries_[i] = wanted[i];
-        if (beforeWindows != data(index(i),Windows) || beforePinned != entries_[i].pinned) emit dataChanged(index(i),index(i),{Pinned,Count,Active,Windows});
+        if(presentedChanged) emit dataChanged(index(i),index(i),{Pinned,Count,Active,Windows});
+        if(iconChanged && !structuralChange) emit dataChanged(index(i),index(i),{Icon});
     }
-    if (!entries_.isEmpty()) emit dataChanged(index(0),index(static_cast<int>(entries_.size())-1),{Icon});
+    if (structuralChange && !entries_.isEmpty()) emit dataChanged(index(0),index(static_cast<int>(entries_.size())-1),{Icon});
     layoutSurfaces();
+    if(preview_.visible()) showPendingPreview();
 }
 void DockController::rebuildSurfaces() {
     rebuilding_ = true;
+    dismissPreview();
     surfaces_.clear();
     if (!enabled_) { rebuilding_ = false; return; }
     const auto available = qGuiApp->screens();
@@ -391,10 +427,50 @@ void DockController::rebuildSurfaces() {
 }
 void DockController::interaction(const QString& screen, bool hovered, bool menu) {
     if (!enabled_ || rebuilding_) return;
+    if(menu) dismissPreview();
     for (auto& surface : surfaces_) if (surface->screen->name() == screen) {
         surface->hovered = hovered; surface->menu = menu;
     }
     layoutSurfaces();
+}
+void DockController::requestPreview(const QString& identity,const QString& screen,qreal x,qreal y,qreal width,qreal height) {
+    if(!enabled_ || !config_["previews"].toBool() || width<=0 || height<=0) return;
+    if(!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height)) return;
+    const int row=indexOf(identity);
+    if(row<0 || entries_[row].windows.isEmpty()) return;
+    previewHideTimer_.stop();
+    const bool changed=previewIdentity_!=identity || previewScreen_!=screen;
+    previewIdentity_=identity;previewScreen_=screen;previewAnchor_=QRectF(x,y,width,height);
+    if(changed || !preview_.visible()) previewShowTimer_.start();
+}
+void DockController::cancelPreview(const QString& identity) {
+    if(previewIdentity_!=identity) return;
+    previewShowTimer_.stop();
+    if(!previewHovered_) previewHideTimer_.start();
+}
+void DockController::dismissPreview() {
+    previewShowTimer_.stop();previewHideTimer_.stop();previewHovered_=false;previewIdentity_.clear();
+    preview_.hide();
+    previewHideTimer_.stop();
+    for(auto& surface:surfaces_) surface->preview=false;
+    if(enabled_ && !rebuilding_) layoutSurfaces();
+}
+void DockController::showPendingPreview() {
+    const int row=indexOf(previewIdentity_);
+    if(!enabled_ || !config_["previews"].toBool() || row<0 || entries_[row].windows.isEmpty()) { dismissPreview(); return; }
+    for(auto& surface:surfaces_) {
+        if(surface->screen->name()!=previewScreen_ || surface->concealed || surface->menu) continue;
+        const auto options=screenConfig(previewScreen_);
+        const bool contrast=theme_["contrast"].toBool();
+        const bool dark=options["theme"]=="dark" || (options["theme"]=="auto" && theme_["dark"].toBool());
+        const QColor background=contrast ? theme_["background"].value<QColor>() : dark ? QColor("#25272d") : QColor("#f0f2f5");
+        const QColor foreground=contrast ? theme_["foreground"].value<QColor>() : dark ? QColor(Qt::white) : QColor(Qt::black);
+        const bool shown=preview_.show(*surface->view,previewAnchor_,options["edge"].toString(),entries_[row].app.title,
+            entries_[row].windows,background,foreground,theme_["accent"].value<QColor>());
+        for(auto& entry:surfaces_) entry->preview=shown && entry.get()==surface.get();
+        layoutSurfaces();return;
+    }
+    dismissPreview();
 }
 void DockController::layoutSurfaces() {
     if (rebuilding_) return;
@@ -422,7 +498,7 @@ void DockController::layoutSurfaces() {
             const QRect physical(p.x,p.y,p.width,p.height);
             overlap = window.rect.intersects(physical);
         }
-        const bool want = shouldHide(values["hideMode"].toInt(),surface->hovered,surface->menu,overlap,fullscreen,values["hideFullscreen"].toBool());
+        const bool want = shouldHide(values["hideMode"].toInt(),surface->hovered,surface->menu || surface->preview,overlap,fullscreen,values["hideFullscreen"].toBool());
         if (!want && surface->concealed && !surface->hidden) {
             surface->fadeTimer->stop(); surface->concealed=false;
         }

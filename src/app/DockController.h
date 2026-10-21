@@ -1,5 +1,6 @@
 #pragma once
 #include "platform/windows/DockWindows.h"
+#include "platform/windows/DockPreview.h"
 #include <QAbstractListModel>
 #include <QVariantMap>
 #include <QQuickView>
@@ -42,6 +43,9 @@ public:
     Q_INVOKABLE void activateWindow(const QString& handle);
     Q_INVOKABLE void closeWindow(const QString& handle);
     Q_INVOKABLE void interaction(const QString& screen, bool hovered, bool menu);
+    Q_INVOKABLE void requestPreview(const QString& identity,const QString& screen,qreal x,qreal y,qreal width,qreal height);
+    Q_INVOKABLE void cancelPreview(const QString& identity);
+    Q_INVOKABLE void dismissPreview();
     Q_INVOKABLE void showSettings(bool dockPage = false) { emit settingsRequested(dockPage); }
     Q_INVOKABLE void quit() { emit quitRequested(); }
 signals:
@@ -61,6 +65,7 @@ private:
     QList<umbrella::platform::DockWindow> windowSnapshot_;
     QList<umbrella::platform::DockApp> pins_;
     umbrella::platform::DockWindows source_;
+    umbrella::platform::DockPreview preview_;
     QVariantMap config_, theme_, monitorConfig_;
     QHash<QString,QString> screenIds_;
     QString status_;
@@ -68,6 +73,10 @@ private:
     bool rebuilding_ = false;
     QTimer refreshTimer_;
     QTimer persistenceTimer_;
+    QTimer previewShowTimer_,previewHideTimer_;
+    QString previewIdentity_,previewScreen_;
+    QRectF previewAnchor_;
+    bool previewHovered_=false;
     std::vector<std::unique_ptr<Surface>> surfaces_;
     void refresh();
     void reconcile(const QList<umbrella::platform::DockWindow>& windows);
@@ -77,4 +86,5 @@ private:
     void report(const QString& text);
     void refreshScreenIds();
     QString screenKey(const QString& name) const;
+    void showPendingPreview();
 };

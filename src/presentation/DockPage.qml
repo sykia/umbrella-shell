@@ -68,6 +68,7 @@ ScrollView {
         Range { Layout.fillWidth:true; caption:"Задержка появления, мс"; key:"revealDelay"; low:100; high:1000 }
         Check { text:"Скрывать для полноэкранных приложений"; checked:dockSystem.config.hideFullscreen; onClicked:dockSystem.configure("hideFullscreen",checked) }
         Check { text:"Показывать незакреплённые запущенные приложения"; checked:dockSystem.config.showRunning; onClicked:dockSystem.configure("showRunning",checked) }
+        Check { text:"Миниатюры окон при наведении (до 8 окон)"; checked:dockSystem.config.previews; onClicked:dockSystem.configure("previews",checked) }
         Check { text:"Анимации (с учётом настроек Windows)"; checked:dockSystem.config.animations; onClicked:dockSystem.configure("animations",checked) }
         Range { Layout.fillWidth:true; caption:"Скорость анимаций, %"; key:"speed"; low:50; high:200 }
         Label { text:"Приложения"; font.pixelSize:18 }
