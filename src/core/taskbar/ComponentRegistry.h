@@ -2,7 +2,7 @@
 #include <string_view>
 
 namespace umbrella::taskbar {
-enum class Component { Unknown, Widgets, Start, Search, TaskView, Applications, Clock, QuickSettings, Desktop, TrayIcons, TrayOverflow, InputIndicators };
+enum class Component { Unknown, Widgets, Start, Search, TaskView, Applications, Clock, QuickSettings, Desktop, TrayIcons, TrayOverflow, InputIndicators, SystemIndicators };
 // Match the outer functional object, never its glyph/text descendants. App task
 // list instances deliberately share a role: an ordinal is not a persistent AppID.
 inline Component identify(std::wstring_view type, std::wstring_view name, std::wstring_view automation) noexcept {
@@ -16,6 +16,7 @@ inline Component identify(std::wstring_view type, std::wstring_view name, std::w
     if (type == L"SystemTray.Stack" && name == L"ShowDesktopStack") return Component::Desktop;
     if (type == L"SystemTray.Stack" && name == L"NotifyIconStack") return Component::TrayOverflow;
     if (type == L"SystemTray.Stack" && name == L"NonActivatableStack") return Component::InputIndicators;
+    if (type == L"SystemTray.Stack" && name == L"MainStack") return Component::SystemIndicators;
     if (type == L"SystemTray.NotificationAreaIcons") return Component::TrayIcons;
     // Automation identity is only meaningful on the original interactive object.
     if (type == L"Taskbar.ExperienceToggleButton" || type == L"Taskbar.SearchBoxButton" ||
@@ -40,7 +41,15 @@ inline const wchar_t* stableId(Component component) noexcept {
     case Component::TrayIcons: return L"trayapps";
     case Component::TrayOverflow: return L"overflow";
     case Component::InputIndicators: return L"input";
+    case Component::SystemIndicators: return L"systemtray";
     default: return L"unknown";
     }
+}
+inline Component componentFromId(std::wstring_view id) noexcept {
+    for(unsigned i=1;i<=static_cast<unsigned>(Component::SystemIndicators);++i) {
+        const auto value=static_cast<Component>(i);
+        if(id==stableId(value))return value;
+    }
+    return Component::Unknown;
 }
 }
