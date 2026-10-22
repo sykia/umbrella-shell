@@ -126,10 +126,12 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
             entry.id[23] = entry.type[95] = entry.parentType[95] = entry.parentName[79] = 0;
             entry.layoutType[95]=0;
             entry.ownerType[95]=0;
+            entry.name[63]=entry.sourceType[63]=0;
             std::printf("  %ls type=%ls parent=%ls/%ls bounds=(%.1f,%.1f,%.1f,%.1f) visible=%u hit=%u movement=unverified\n",
                 entry.id, entry.type, entry.parentType, entry.parentName, entry.x, entry.y, entry.width, entry.height,
                 entry.visible, entry.hitTestVisible);
             std::printf("    layout=%ls status=%08lx modelIndex=%d\n",entry.layoutType,static_cast<unsigned long>(entry.layoutStatus),entry.modelIndex);
+            std::printf("    name=%ls source=%ls\n",entry.name,entry.sourceType);
             std::printf("    owner=%ls status=%08lx depth=%u containerId=%u ownerId=%u\n",entry.ownerType,static_cast<unsigned long>(entry.ownerStatus),entry.ownerDepth,entry.containerId,entry.ownerId);
         }
         reportReceived = true;
@@ -162,7 +164,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
     }
     if(message==trayMessage) {
         char device[64]{};
-        if(wp>1 || lp)return FALSE;
+        if(wp>=24 || lp)return FALSE;
         {const std::lock_guard lock(trayRequestMutex);strcpy_s(device,pendingTrayDevice);pendingTrayDevice[0]=0;}
         if(!device[0])return FALSE;
         for(const auto& item:attachments) {
@@ -171,7 +173,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
             WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,current,64,nullptr,nullptr);
             if(std::strcmp(device,current))continue;
             nativeEditTarget=item.window;
-            const bool ok=SendMessageW(window,editMessage,static_cast<WPARAM>(EditAction::TrayClockFirst),wp)!=0;
+            const bool ok=SendMessageW(window,editMessage,static_cast<WPARAM>(EditAction::TrayOrder),wp)!=0;
             std::printf(ok?"tray-ok %s\n":"tray-refused %s\n",device);std::fflush(stdout);return ok;
         }
         std::printf("tray-refused %s\n",device);std::fflush(stdout);return FALSE;
@@ -467,6 +469,8 @@ int wmain(int argc, wchar_t** argv) {
                         PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::AfterWidgets), x);
                     else if (sscanf_s(line, "tray-clock-first %u %c", &x, &extra, 1u) == 1 && x<=1)
                         PostMessageW(owner,editMessage,static_cast<WPARAM>(EditAction::TrayClockFirst),x);
+                    else if (sscanf_s(line, "tray-order %u %c", &x, &extra, 1u) == 1 && x<24)
+                        PostMessageW(owner,editMessage,static_cast<WPARAM>(EditAction::TrayOrder),x);
                     else if (!std::strcmp(line,"taskview-reset\n")) PostMessageW(owner,editMessage,static_cast<WPARAM>(EditAction::ResetTaskView),0);
                     else if (!std::strcmp(line, "status\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Status), 0);
                     else if (!std::strcmp(line, "reset\n")) PostMessageW(owner, editMessage, static_cast<WPARAM>(EditAction::Reset), 0);
@@ -519,7 +523,8 @@ int wmain(int argc, wchar_t** argv) {
             while (std::fgets(line, sizeof(line), stdin)) {
                 unsigned width{}, edge{}, thickness = 48, mode = 0, detached = 0; char extra{};
                 MonitorRequest request;
-                if(sscanf_s(line,"tray %u %63s %c",&width,request.device,64u,&extra,1u)==2 && width<=1) {
+                if((sscanf_s(line,"tray-order %u %63s %c",&width,request.device,64u,&extra,1u)==2 && width<24) ||
+                    (sscanf_s(line,"tray %u %63s %c",&width,request.device,64u,&extra,1u)==2 && width<=1)) {
                     {const std::lock_guard lock(trayRequestMutex);strcpy_s(pendingTrayDevice,request.device);}
                     SendMessageW(owner,trayMessage,width,0);continue;
                 }

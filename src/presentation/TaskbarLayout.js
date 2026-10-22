@@ -7,7 +7,7 @@ var catalog = [
     {id:"taskview", label:"Представление задач", seen:true, secondary:true, zone:"center", native:true},
     {id:"apps", label:"Приложения", seen:true, secondary:true, zone:"center"},
     {id:"overflow", label:"Скрытые значки", seen:true, zone:"right"},
-    {id:"input", label:"Язык ввода", seen:true, zone:"right"},
+    {id:"input", label:"Индикаторы ввода", seen:true, zone:"right"},
     {id:"network", label:"Сеть", seen:true, zone:"right"},
     {id:"volume", label:"Громкость", seen:true, zone:"right"},
     {id:"clock", label:"Часы и дата", seen:true, secondary:true, zone:"right"},
@@ -47,7 +47,10 @@ function nativeConfiguration(value) {
     var base=defaults(true), left=move(base,"taskview","left",1)
     var same=(a,b) => JSON.stringify(a)===JSON.stringify(b)
     var taskview=(same(value.left,base.left) && same(value.center,base.center)) || (same(value.left,left.left) && same(value.center,left.center))
-    var tray=same(value.right,base.right) || same(value.right,["overflow","input","clock","network","volume","desktop"])
+    // Four original groups can occupy any of the four right-side slots.
+    // Network/volume remain adjacent; Show Desktop retains its edge semantics.
+    var tray=value.right.length===6 && value.right[5]==="desktop" && value.right.indexOf("volume")===value.right.indexOf("network")+1 &&
+        ["overflow","input","network","volume","clock"].every(id => value.right.slice(0,5).indexOf(id)>=0)
     return taskview && tray && same(value.available,base.available)
 }
 function defaults(primary) {

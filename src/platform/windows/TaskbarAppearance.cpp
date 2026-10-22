@@ -393,7 +393,7 @@ bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge,
     error = QStringLiteral("Monitor taskbar unavailable."); return false;
 }
 bool TaskbarAppearance::nativeSessionActive() const {return impl_->module.running();}
-bool TaskbarAppearance::reorderTray(const QString& device,bool enabled,QString& error) {return impl_->module.reorderTray(device,enabled,error);}
+bool TaskbarAppearance::reorderTray(const QString& device,unsigned order,QString& error) {return impl_->module.reorderTray(device,order,error);}
 bool TaskbarAppearance::restore(QString& error) {
     auto& d = *impl_;
     const bool alive = std::any_of(d.snapshots.begin(), d.snapshots.end(), [](const Snapshot& value) { return valid(value); });

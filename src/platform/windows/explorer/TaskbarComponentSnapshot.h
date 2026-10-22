@@ -26,7 +26,7 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
             root = parent;
         }
         std::vector<DependencyObject> pending{root};
-        struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type; };
+        struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type, sourceType; };
         std::vector<ParentLayout> layouts;
         std::vector<FrameworkElement> owners;
         unsigned visited = 0;
@@ -37,12 +37,16 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                 const auto type = winrt::get_class_name(element);
                 const auto role = taskbar::identify(type.c_str(), element.Name().c_str(),
                     Automation::AutomationProperties::GetAutomationId(element).c_str());
-                if (role != taskbar::Component::Unknown) {
+                auto parent = Media::VisualTreeHelper::GetParent(element).try_as<FrameworkElement>();
+                // Include original tray layout slots, including collapsed and
+                // conditional groups, without assigning movement capability.
+                const bool traySlot=parent && parent.Name()==L"SystemTrayFrameGrid" && parent.try_as<Controls::StackPanel>();
+                if (role != taskbar::Component::Unknown || traySlot) {
                     if (result.count == maxComponentSnapshot) { result.status = E_ABORT; return result; }
                     auto& entry = result.entries[result.count++];
-                    wcsncpy_s(entry.id, taskbar::stableId(role), _TRUNCATE);
+                    wcsncpy_s(entry.id, traySlot && role==taskbar::Component::Unknown ? L"tray-slot" : taskbar::stableId(role), _TRUNCATE);
                     wcsncpy_s(entry.type, type.c_str(), _TRUNCATE);
-                    auto parent = Media::VisualTreeHelper::GetParent(element).try_as<FrameworkElement>();
+                    wcsncpy_s(entry.name,element.Name().c_str(),_TRUNCATE);
                     if (parent) {
                         wcsncpy_s(entry.parentType, winrt::get_class_name(parent).c_str(), _TRUNCATE);
                         wcsncpy_s(entry.parentName, parent.Name().c_str(), _TRUNCATE);
@@ -58,14 +62,17 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                         entry.ownerId=static_cast<unsigned>(identity-owners.begin())+1;
                         auto cached=std::find_if(layouts.begin(),layouts.end(),[&](const auto& value){return value.parent==owner.container;});
                         if (cached==layouts.end()) {
-                            repeater::Value layout{nullptr};
+                            repeater::Value layout{nullptr},source{nullptr};
                             const HRESULT status=repeater::layout(owner.container,layout);
-                            layouts.push_back({owner.container,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{}});
+                            const auto sourceStatus=repeater::itemsSource(owner.container,source);
+                            layouts.push_back({owner.container,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{},
+                                SUCCEEDED(sourceStatus)&&source ? winrt::get_class_name(source) : winrt::hstring{}});
                             cached=std::prev(layouts.end());
                         }
                         entry.containerId=static_cast<unsigned>(cached-layouts.begin())+1;
                         entry.layoutStatus=cached->status;
                         wcsncpy_s(entry.layoutType,cached->type.c_str(),_TRUNCATE);
+                        wcsncpy_s(entry.sourceType,cached->sourceType.c_str(),_TRUNCATE);
                     }
                     const auto box = element.TransformToVisual(root).TransformBounds(
                         {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});

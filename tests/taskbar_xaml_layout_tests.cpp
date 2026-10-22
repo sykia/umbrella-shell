@@ -5,6 +5,7 @@
 #include "platform/windows/explorer/TaskbarRepeaterAccess.h"
 #include "platform/windows/explorer/TaskbarRepeaterModel.h"
 #include "platform/windows/explorer/TaskbarPanelOrder.h"
+#include "core/taskbar/TrayOrder.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Automation.Provider.h>
@@ -317,6 +318,22 @@ void exercise() {
     require(!collection.reset() && parent.Children().Size()==4,"Reset overwrote a newer system collection");
     parent.Children().RemoveAt(3); parent.UpdateLayout();
     require(collection.reset(),"Fixture-owned cleanup could not release stale binding");
+    parent.Children().Clear();
+    Controls::Button fourth;fourth.Width(100);fourth.Height(48);
+    Controls::Border conditional;conditional.Width(32);conditional.Height(48);
+    const std::array<UIElement,4> groups{first,second,third,fourth};
+    parent.Children().Append(first);parent.Children().Append(second);
+    parent.Children().Append(conditional);parent.Children().Append(third);parent.Children().Append(fourth);
+    parent.UpdateLayout();
+    require(collection.bind(parent),"Four-group native fixture could not bind");
+    for(unsigned code=0;code<24;++code) {
+        conditional.Visibility(code%2 ? Visibility::Collapsed : Visibility::Visible);
+        const auto order=*taskbar::trayOrder(code);
+        const std::vector<UIElement> desired{groups[order[0]],groups[order[1]],conditional,groups[order[2]],groups[order[3]]};
+        require(collection.apply(desired)==taskbar::Transaction::Applied,"One of 24 native group permutations failed");
+        require(parent.Children().GetAt(2)==conditional && fourth.Width()==100,"Unknown fixed slot or variable group width changed");
+    }
+    require(collection.reset() && parent.Children().GetAt(0)==first && parent.Children().GetAt(4)==fourth,"Four-group native reset failed");
     source.Content(nullptr); source.Close();
     std::cout << "Passed: original Windows XAML buttons in private offscreen HWND, layout slots, same parent/Translation/TabIndex, original Click via automation, restore and stale reflow rejection. Explorer/foreground untouched.\n";
 }

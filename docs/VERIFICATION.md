@@ -5,6 +5,43 @@
 
 ## Подтверждённые результаты
 
+22 октября, расширение трея до четырёх оригинальных групп:
+
+- Полная прямая сборка MSVC 14.42/Qt 6.8.3 через Build-Local, deployment Qt и
+  релевантные placement/reorder/snapshot/session/XAML/host fixtures прошли.
+  CMake presets, installer и D3D smoke во время игры не запускались.
+- Core проверяет все 24 кодировки/обратное преобразование, недопустимые порядки
+  и совместимость прежнего кода обмена часов. Собственный XAML fixture проверяет
+  все 24 перестановки исходных объектов разной ширины, сохранение фиксированного
+  служебного слота при его появлении/скрытии и reset. Прежние Click/TabIndex,
+  stale-model и rollback проверки сохранены.
+- Offscreen QML suite прошёл: перенос input/overflow через соседние группы,
+  связанный network/volume drag, запрет межзонного drop, отказ native, Escape,
+  coalescing, переключение монитора и автопрокрутка; warnings отсутствуют.
+- Явный quiet `--tray-only` на настоящем Explorer прошёл для всех 24 порядков
+  через TaskbarSettings и действующий appearance-host: проверены настоящие XAML
+  координаты четырёх групп, sandboxed persist, отказ разделить network/volume,
+  повторный запуск нового владельца, reset и восстановление при shutdown.
+  Сохранились bounds/workarea/DPI/regions/styles двух панелей, идентичность
+  Explorer, foreground и действительные Run/TaskbarLocation. Тестовые INI и
+  HKCU изолированы; физический ввод и flyout не вызывались.
+- 24 apply/verify/persist вместе с диагностическими IPC заняли 1187 мс;
+  полный внешний quiet-прогон — 12166 мс. Это не измерение чистого native apply
+  или задержки drag/drop. За прогон Explorer private bytes изменились на
+  -60682240, working set на -12824576, handles на -46, threads на -2;
+  CPU delta 296.875 мс. Фоновая активность не изолирована, поэтому эти значения
+  не доказывают оптимизацию или отсутствие утечки. Сопоставимого baseline нет.
+
+Первая desktop-попытка корректно отказала при появлении неизвестного видимого
+MainStack; состояние было восстановлено. Проверка была излишне строгой:
+условные соседи теперь сохраняют исходные collection slots и участвуют в общей
+проверке геометрии, а не запрещают остальные переносы. Последующий явный
+прогон всех 24 порядков прошёл. Меню/клики/flyout/keyboard navigation настоящего
+трея, смешанный DPI и native reorder дополнительной панели не проверялись.
+Start/Search/Widgets, модель приложений и переносы трея между зонами не готовы.
+Наблюдаемый тип центрального ItemsSource — INotifyCollectionChanged; это не
+подтверждённый интерфейс изменения модели. Снимок v4 не даёт разрешения записи.
+
 21 октября, рабочий Clock/Quick Settings reorder: собственный Windows XAML fixture
 проверил logical child order, реальные slots, исходный Click/TabIndex/parent,
 reset, отказ при новом peer и запрет затирания чужой коллекции. QML offscreen suite

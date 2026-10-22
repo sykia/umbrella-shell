@@ -2,7 +2,7 @@
 #include <string_view>
 
 namespace umbrella::taskbar {
-enum class Component { Unknown, Widgets, Start, Search, TaskView, Applications, Clock, QuickSettings, Desktop, TrayIcons };
+enum class Component { Unknown, Widgets, Start, Search, TaskView, Applications, Clock, QuickSettings, Desktop, TrayIcons, TrayOverflow, InputIndicators };
 // Match the outer functional object, never its glyph/text descendants. App task
 // list instances deliberately share a role: an ordinal is not a persistent AppID.
 inline Component identify(std::wstring_view type, std::wstring_view name, std::wstring_view automation) noexcept {
@@ -14,6 +14,8 @@ inline Component identify(std::wstring_view type, std::wstring_view name, std::w
         if (name == L"ControlCenterButton") return Component::QuickSettings;
     }
     if (type == L"SystemTray.Stack" && name == L"ShowDesktopStack") return Component::Desktop;
+    if (type == L"SystemTray.Stack" && name == L"NotifyIconStack") return Component::TrayOverflow;
+    if (type == L"SystemTray.Stack" && name == L"NonActivatableStack") return Component::InputIndicators;
     if (type == L"SystemTray.NotificationAreaIcons") return Component::TrayIcons;
     // Automation identity is only meaningful on the original interactive object.
     if (type == L"Taskbar.ExperienceToggleButton" || type == L"Taskbar.SearchBoxButton" ||
@@ -36,6 +38,8 @@ inline const wchar_t* stableId(Component component) noexcept {
     case Component::QuickSettings: return L"quicksettings";
     case Component::Desktop: return L"desktop";
     case Component::TrayIcons: return L"trayapps";
+    case Component::TrayOverflow: return L"overflow";
+    case Component::InputIndicators: return L"input";
     default: return L"unknown";
     }
 }

@@ -4,6 +4,7 @@
 #include <objbase.h>
 #include <oleauto.h>
 #include "app/TaskbarSettings.h"
+#include "core/taskbar/TrayOrder.h"
 #include <UIAutomation.h>
 #include <wrl/client.h>
 #include <QGuiApplication>
@@ -101,7 +102,7 @@ int main(int argc, char** argv) {
             if(!probe.waitForFinished(5000) || probe.exitCode()!=0)return QString();
             const QString output=QString::fromUtf8(probe.readAllStandardOutput());
             QString result;
-            for(const auto& role:{QStringLiteral("clock"),QStringLiteral("quicksettings")}) {
+            for(const auto& role:{QStringLiteral("overflow"),QStringLiteral("input"),QStringLiteral("clock"),QStringLiteral("quicksettings")}) {
                 const auto match=QRegularExpression("^  "+role+" .*?bounds=\\(([^)]+)\\) visible=1",QRegularExpression::MultilineOption).match(output);
                 if(!match.hasMatch())return QString();
                 result+=role+":"+match.captured(1)+";";
@@ -112,7 +113,7 @@ int main(int argc, char** argv) {
         const auto original=snapshot();if(original.isEmpty())return 11;
         const auto configuration=QJsonDocument::fromJson(R"({"version":1,"gap":8,
             "left":["widgets"],"center":["start","search","taskview","apps"],
-            "right":["overflow","input","clock","network","volume","desktop"],
+            "right":["clock","network","volume","input","overflow","desktop"],
             "available":["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"]})").object().toVariantMap();
         QString monitor;
         {
@@ -123,6 +124,28 @@ int main(int argc, char** argv) {
             model.apply("bottom",false,0,false,100,48,false);
             QSettings profile(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
             if(!profile.contains("appearanceProfilesV1")){std::fprintf(stderr,"Appearance setup: %s\n",model.status().toUtf8().constData());return 19;}
+            QElapsedTimer elapsed;elapsed.start();
+            for(unsigned code=0;code<24;++code) {
+                const auto order=*umbrella::taskbar::trayOrder(code);
+                QStringList right;
+                const std::array<QStringList,4> ids{QStringList{"overflow"},QStringList{"input"},QStringList{"network","volume"},QStringList{"clock"}};
+                for(const auto role:order)right.append(ids[role]);
+                right.append("desktop");
+                auto candidate=configuration;candidate["right"]=right;
+                if(!model.applyComponentConfiguration(monitor,candidate)) {
+                    std::fprintf(stderr,"Permutation %u: %s\n",code,model.status().toUtf8().constData());return 20;
+                }
+                const auto measured=snapshot();if(measured.isEmpty())return 21;
+                double last=-1;
+                for(const auto role:order) {
+                    const auto componentId=role==2 ? QStringLiteral("quicksettings") : ids[role].front();
+                    const auto match=QRegularExpression(componentId+":([-0-9.]+),").match(measured);
+                    bool valid=false;const double x=match.captured(1).toDouble(&valid);
+                    if(!valid || x<=last)return 22;
+                    last=x;
+                }
+            }
+            std::printf("All 24 original tray group orders verified through native slots and sandboxed persistence in %lld ms (includes diagnostic IPC).\n",elapsed.elapsed());
             if(!model.applyComponentConfiguration(monitor,configuration)){std::fprintf(stderr,"Tray apply: %s\n",model.status().toUtf8().constData());return 12;}
             if(model.activeComponentConfiguration()!=configuration || model.componentDraft(monitor)!=configuration || snapshot()==original)return 13;
             auto invalid=configuration;invalid["right"]=QStringList{"overflow","input","network","clock","volume","desktop"};
@@ -138,7 +161,7 @@ int main(int argc, char** argv) {
         if(state.contains("confirmedComponentV1") || state.value("resumeAppearance",true).toBool() || GetForegroundWindow()!=foreground){
             std::printf("Tray reset diagnostics: confirmed=%u resume=%u foreground=%u\n",state.contains("confirmedComponentV1"),state.value("resumeAppearance",true).toBool(),GetForegroundWindow()==foreground);return 18;
         }
-        std::puts("Passed: real tray order through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
+        std::puts("Passed: 24 real tray orders through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
         return 0;
     }
     QVariantMap confirmedForRestart;

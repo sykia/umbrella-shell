@@ -1,4 +1,5 @@
 #include "TaskbarSettings.h"
+#include "core/taskbar/TrayOrder.h"
 #include "platform/windows/TaskbarState.h"
 #include "platform/windows/TaskbarModuleSession.h"
 #include "platform/windows/TaskbarRuntime.h"
@@ -364,8 +365,22 @@ bool TaskbarSettings::saveComponentDraft(const QString& monitor, const QVariantM
 }
 
 namespace {
-// Only measured Task View placement and the adjacent Clock/Quick Settings swap
-// are accepted. Arbitrary drafts must never become native-confirmed layouts.
+// Native groups retain their original objects. Quick Settings is indivisible
+// and Show Desktop remains at the physical edge.
+std::optional<unsigned> componentTrayOrder(const QJsonArray& right) {
+    if(right.size()!=6 || right.last()!=QStringLiteral("desktop"))return {};
+    umbrella::taskbar::TrayOrder order{};unsigned count=0;
+    for(qsizetype i=0;i<right.size()-1;++i) {
+        if(count>=order.size())return {};
+        const auto id=right[i].toString();
+        if(id=="overflow")order[count++]=0;
+        else if(id=="input")order[count++]=1;
+        else if(id=="clock")order[count++]=3;
+        else if(id=="network" && i+1<right.size()-1 && right[i+1]==QStringLiteral("volume")){order[count++]=2;++i;}
+        else return {};
+    }
+    return count==4 ? umbrella::taskbar::trayOrderCode(order) : std::nullopt;
+}
 bool supportedComponentConfiguration(const QVariantMap& configuration) {
     if (!validDraft(configuration)) return false;
     const auto value = QJsonObject::fromVariantMap(configuration);
@@ -378,9 +393,7 @@ bool supportedComponentConfiguration(const QVariantMap& configuration) {
     if(value.value("available")!=expected.value("available"))return false;
     const bool taskViewLeft=value.value("left")==expected.value("left") && value.value("center")==expected.value("center");
     const bool taskViewDefault=value.value("left")==QJsonArray{"widgets"} && value.value("center")==QJsonArray{"start","search","taskview","apps"};
-    const bool trayDefault=value.value("right")==expected.value("right");
-    const bool trayClockFirst=value.value("right")==QJsonArray{"overflow","input","clock","network","volume","desktop"};
-    return (taskViewLeft || taskViewDefault) && (trayDefault || trayClockFirst);
+    return (taskViewLeft || taskViewDefault) && componentTrayOrder(value.value("right").toArray()).has_value();
 }
 }
 bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration) {
@@ -393,16 +406,17 @@ bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const 
         if(pending_ || !primary){status_=QStringLiteral("Эта перестановка поддерживается только на основной панели.");return false;}
         QString error;
         const bool left=value["left"].toStringList().contains("taskview");
-        const bool clockFirst=value["right"].toStringList().indexOf("clock")<value["right"].toStringList().indexOf("network");
+        const auto trayOrder=componentTrayOrder(QJsonArray::fromVariantList(value["right"].toList()));
+        if(!trayOrder)return false;
         if(!left && appearance_.nativeSessionActive()) {
-            if(!componentSession_.stop(error) || !appearance_.reorderTray(device,clockFirst,error)){status_=error;return false;}
+            if(!componentSession_.stop(error) || !appearance_.reorderTray(device,*trayOrder,error)){status_=error;return false;}
             trayInAppearance_=true;trayDevice_=device;return true;
         }
         if(trayInAppearance_) {
             if(!appearance_.reorderTray(trayDevice_,false,error)){status_=error;return false;}
             trayInAppearance_=false;trayDevice_.clear();
         }
-        const bool ok=componentSession_.configureComponents(left,value["gap"].toInt(),clockFirst,error);
+        const bool ok=componentSession_.configureComponents(left,value["gap"].toInt(),*trayOrder,error);
         if(!ok)status_=error;
         return ok;
     };

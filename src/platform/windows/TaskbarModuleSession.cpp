@@ -85,8 +85,8 @@ bool TaskbarModuleSession::stop(QString& error) {
     }
     return true;
 }
-bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,bool clockFirst,QString& error) {
-    if(gap<0 || gap>96 || !layoutAvailable()){error=QStringLiteral("Нативное размещение компонентов несовместимо с этой сборкой Windows.");return false;}
+bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,unsigned trayOrder,QString& error) {
+    if(gap<0 || gap>96 || trayOrder>=24 || !layoutAvailable()){error=QStringLiteral("Нативное размещение компонентов несовместимо с этой сборкой Windows.");return false;}
     if(host_.state()==QProcess::NotRunning) {
         host_.setProgram(hostPath());host_.setArguments({"--configure-taskview"});
         host_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
@@ -97,7 +97,7 @@ bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,bool cl
     }
     const QList<QByteArray> commands{
         taskViewLeft ? QByteArray("after-widgets ")+QByteArray::number(gap)+'\n' : QByteArray("taskview-reset\n"),
-        QByteArray("tray-clock-first ")+(clockFirst ? "1\n" : "0\n")};
+        QByteArray("tray-order ")+QByteArray::number(trayOrder)+'\n'};
     for(const auto& command:commands) {
         if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("taskview-ok")) {
             QString rollback;
@@ -109,10 +109,11 @@ bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,bool cl
     }
     return true;
 }
-bool TaskbarModuleSession::reorderTray(const QString& device,bool enabled,QString& error) {
+bool TaskbarModuleSession::reorderTray(const QString& device,unsigned order,QString& error) {
+    if(order>=24){error=QStringLiteral("Недопустимый порядок трея.");return false;}
     if(!device.startsWith(QStringLiteral("\\\\.\\DISPLAY")) || device.size()>32 || device.contains(' ') || device.contains('\n')){error=QStringLiteral("Недопустимый монитор.");return false;}
-    if(!running()){if(!enabled)return true;error=QStringLiteral("Сессия оформления не запущена.");return false;}
-    const auto command=QByteArray("tray ")+(enabled?"1 ":"0 ")+device.toLatin1()+'\n';
+    if(!running()){if(!order)return true;error=QStringLiteral("Сессия оформления не запущена.");return false;}
+    const auto command=QByteArray("tray-order ")+QByteArray::number(order)+' '+device.toLatin1()+'\n';
     if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("tray-ok "+device.toLatin1())) {
         error=QStringLiteral("Windows не подтвердила порядок трея. Оформление не отключалось.");return false;
     }

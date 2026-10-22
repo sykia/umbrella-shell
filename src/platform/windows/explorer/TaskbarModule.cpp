@@ -260,7 +260,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         }
         if (packet && packet->dwData == editProtocol && packet->cbData == sizeof(EditRequest) && packet->lpData) {
             const auto request = *static_cast<const EditRequest*>(packet->lpData);
-            if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::ResetTaskView) return FALSE;
+            if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::TrayOrder) return FALSE;
             HRESULT status = S_OK;
             if (request.action == EditAction::Begin) {
                 // Experiment never combines with resizing, islands or native edge changes.
@@ -269,6 +269,9 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                 status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.position(hwnd, request.position);
             } else if (request.action == EditAction::AfterWidgets) {
                 status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.afterWidgets(hwnd, request.position);
+            } else if (request.action == EditAction::TrayOrder) {
+                status=(!std::isfinite(request.position) || request.position<0 || request.position>=24 || std::floor(request.position)!=request.position)
+                    ? E_ACCESSDENIED : state->trayOrder.apply(hwnd,static_cast<unsigned>(request.position));
             } else if (request.action == EditAction::TrayClockFirst) {
                 status=(request.position!=0 && request.position!=1) ? E_ACCESSDENIED : state->trayOrder.clockBeforeQuickSettings(hwnd,request.position==1);
             } else if (request.action == EditAction::ResetTaskView) {
@@ -279,7 +282,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                 if(!tray || !button)status=E_FAIL;
             }
             EditReport report;
-            if(request.action==EditAction::TrayClockFirst)report.status=status;
+            if(request.action==EditAction::TrayClockFirst || request.action==EditAction::TrayOrder)report.status=status;
             else report=state->buttonEdit.report(hwnd,status);
             COPYDATASTRUCT reply{editReportProtocol, sizeof(report), &report};
             DWORD_PTR received{};

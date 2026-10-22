@@ -31,7 +31,7 @@ static_assert(sizeof(Configuration) == 32);
 // Opt-in developer experiment; never included in the persistent configuration.
 inline constexpr ULONG_PTR editProtocol = protocol + 2;
 inline constexpr ULONG_PTR editReportProtocol = protocol + 3;
-enum class EditAction : std::uint32_t { Inspect, Begin, Preview, Reset, Status, Place, AfterWidgets, TrayClockFirst, ResetTaskView };
+enum class EditAction : std::uint32_t { Inspect, Begin, Preview, Reset, Status, Place, AfterWidgets, TrayClockFirst, ResetTaskView, TrayOrder };
 struct EditRequest {
     std::uint32_t size = sizeof(EditRequest);
     std::uint32_t version = 1;
@@ -61,6 +61,7 @@ inline constexpr ULONG_PTR componentSnapshotProtocol = protocol + 5;
 inline constexpr unsigned maxComponentSnapshot = 48;
 struct ComponentSnapshotEntry {
     wchar_t id[24]{}, type[96]{}, parentType[96]{}, parentName[80]{};
+    wchar_t name[64]{}, sourceType[64]{};
     wchar_t layoutType[96]{};
     HRESULT layoutStatus = E_NOINTERFACE;
     std::int32_t modelIndex = -1;
@@ -71,14 +72,14 @@ struct ComponentSnapshotEntry {
     std::uint32_t visible{}, hitTestVisible{};
 };
 struct ComponentSnapshot {
-    std::uint32_t size = sizeof(ComponentSnapshot), version = 3;
+    std::uint32_t size = sizeof(ComponentSnapshot), version = 4;
     HRESULT status = E_FAIL;
     std::uint32_t count{}, visited{};
     ComponentSnapshotEntry entries[maxComponentSnapshot]{};
 };
 static_assert(sizeof(ComponentSnapshot) < 65536);
 inline bool validComponentSnapshot(const ComponentSnapshot& snapshot) noexcept {
-    if (snapshot.size!=sizeof(ComponentSnapshot) || snapshot.version!=3 ||
+    if (snapshot.size!=sizeof(ComponentSnapshot) || snapshot.version!=4 ||
         snapshot.count>maxComponentSnapshot || snapshot.visited>512) return false;
     for(unsigned i=0;i<snapshot.count;++i) {
         const auto& entry=snapshot.entries[i];

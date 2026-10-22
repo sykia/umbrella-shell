@@ -1,4 +1,5 @@
 #include "core/taskbar/Placement.h"
+#include "core/taskbar/TrayOrder.h"
 #include "core/taskbar/ComponentRegistry.h"
 #include <array>
 #include <cstdlib>
@@ -9,10 +10,21 @@ void require(bool ok, const char* message) {
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
 int main() {
+    for(unsigned code=0;code<24;++code) {
+        const auto order=trayOrder(code);
+        require(order && trayOrderCode(*order)==code,"tray permutation does not round-trip");
+        auto sorted=*order;std::sort(sorted.begin(),sorted.end());
+        require(sorted==TrayOrder{0,1,2,3},"tray group duplicated or missing");
+    }
+    require(trayOrder(1)==TrayOrder{0,1,3,2},"saved Clock/Quick Settings order changed meaning");
+    require(!trayOrder(24) && !trayOrderCode(TrayOrder{0,0,2,3}),"invalid tray permutation accepted");
     require(identify(L"Windows.UI.Xaml.Controls.ToggleButton", L"StartButton", L"") == Component::Start, "Start identity lost");
     require(identify(L"Taskbar.TaskListButton", L"TaskListButton", L"private-app-id") == Component::Applications, "task list role lost");
     require(identify(L"SystemTray.OmniButton", L"ControlCenterButton", L"") == Component::QuickSettings, "Quick Settings split into fake independent controls");
     require(identify(L"SystemTray.OmniButton", L"NotificationCenterButton", L"") == Component::Clock, "clock group lost");
+    require(identify(L"SystemTray.Stack",L"NotifyIconStack",L"")==Component::TrayOverflow,"original icon stack lost");
+    require(identify(L"SystemTray.Stack",L"NonActivatableStack",L"")==Component::InputIndicators,"original input group lost");
+    require(identify(L"SystemTray.Stack",L"UnknownStack",L"")==Component::Unknown,"unknown system group granted identity");
     require(identify(L"Windows.UI.Xaml.Controls.TextBlock", L"StartButton", L"StartButton") == Component::Unknown, "glyph classified as functional button");
     require(identify(L"Unknown.NewControl", L"StartButton", L"StartButton") == Component::Unknown, "unknown container granted identity");
     const std::array obstacles{Rectangle{0, 0, 216, 48}, Rectangle{500, 0, 300, 48}};

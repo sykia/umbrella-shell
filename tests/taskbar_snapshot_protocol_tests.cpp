@@ -9,8 +9,10 @@ int main(){
     packet.version=1;
     require(!validComponentSnapshot(packet),"Old module snapshot ABI accepted by new host");
     packet.version=2;
-    require(!validComponentSnapshot(packet),"v2 snapshot accepted as v3");
-    packet.version=3; packet.size=sizeof(packet)-sizeof(ComponentSnapshotEntry);
+    require(!validComponentSnapshot(packet),"v2 snapshot accepted as v4");
+    packet.version=3;
+    require(!validComponentSnapshot(packet),"v3 snapshot accepted with a different entry size");
+    packet.version=4; packet.size=sizeof(packet)-sizeof(ComponentSnapshotEntry);
     require(!validComponentSnapshot(packet),"Truncated module snapshot accepted");
     packet.size=sizeof(packet); packet.count=maxComponentSnapshot+1;
     require(!validComponentSnapshot(packet),"Packet could index beyond fixed entries");
@@ -29,5 +31,5 @@ int main(){
     require(!validComponentSnapshot(packet),"Out-of-snapshot container identity accepted");
     owner.containerId=1; owner.ownerStatus=E_ABORT;
     require(!validComponentSnapshot(packet),"Failed owner retained apparently usable model identity");
-    std::cout<<"Passed: v1/v2/v3 mismatch, truncated snapshot, array/traversal bounds and explicit failure framing. No Explorer.\n";
+    std::cout<<"Passed: v1/v2/v3/v4 mismatch, truncated snapshot, array/traversal bounds and explicit failure framing. No Explorer.\n";
 }
