@@ -14,7 +14,7 @@ struct ComponentLayoutRequest {
 };
 // Empty request means restore the original layout, never hide all controls.
 inline bool validComponentLayout(const ComponentLayoutRequest& request) noexcept {
-    if(request.size!=sizeof(request) || request.version!=1 || request.count>maxLayoutGroups || request.gap>96 || request.flags>1 || (request.flags && request.count))return false;
+    if(request.size!=sizeof(request) || request.version!=1 || request.count>maxLayoutGroups || request.gap>96 || request.flags!=0)return false;
     for(unsigned i=0;i<request.count;++i) {
         const auto& entry=request.entries[i];
         const auto end=std::find(std::begin(entry.id),std::end(entry.id),L'\0');

@@ -6,6 +6,8 @@
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <memory>
+#include <winrt/Windows.UI.Xaml.Interop.h>
+#include <winrt/Windows.Foundation.Collections.h>
 
 namespace umbrella::explorer::component_layout {
 using namespace winrt::Windows::UI::Xaml;
@@ -21,9 +23,13 @@ class Session {
     struct Control {
         bool active=true,writing=false;
         FrameworkElement root{nullptr},repeater{nullptr};Controls::StackPanel tray{nullptr};
+        Value layout{nullptr},source{nullptr};
+        int repeaterChildren=-1,trayChildren=-1;
         ComponentLayoutRequest request;
         HRESULT status=E_PENDING;
         unsigned passes=0,generation=0,appliedGeneration=~0u;
+        unsigned budgetGeneration=~0u,attempts=0;
+        double budgetWidth=-1,budgetHeight=-1;
         unsigned failurePhase=0,failureItem=0;
         std::vector<Binding> bindings;
         struct Role {UIElement item{nullptr};taskbar::Component role;};
@@ -31,8 +37,10 @@ class Session {
         std::vector<taskbar::Move> confirmed;
     };
     std::shared_ptr<Control> control_;
-    winrt::com_ptr<layout_contract::Attached> attached_;
-    Value layout_{nullptr},original_{nullptr};
+    Interop::INotifyCollectionChanged notifications_{nullptr};
+    winrt::Windows::Foundation::Collections::IObservableVector<Value> vector_{nullptr};
+    winrt::event_token changed_{};
+    bool modelSubscribed_=false;
     winrt::event_token updated_{};bool subscribed_=false;
 
     static void pin() noexcept {
@@ -93,16 +101,29 @@ class Session {
             c.bindings.push_back({item,parent,cached->role,Controls::Primitives::LayoutInformation::GetLayoutSlot(item),box});
         }
     }
+    static void fail(Control& c,HRESULT status) noexcept {
+        c.status=status;c.active=false;c.confirmed.clear();
+        try {
+            Value layout{nullptr},source{nullptr};
+            winrt::check_hresult(repeater::layout(c.repeater,layout));
+            winrt::check_hresult(repeater::itemsSource(c.repeater,source));
+            if(layout!=c.layout || source!=c.source)return;
+            // Request one ordinary owner pass; never recurse into UpdateLayout
+            // from LayoutUpdated, or retry a rejected layout on every frame.
+            c.tray.InvalidateArrange();c.repeater.InvalidateArrange();c.root.InvalidateMeasure();
+        }catch(...){} // Preserve the original failure; reset still reports its own result.
+    }
     struct Adapter {
         Control& c;
+        unsigned generation=c.generation;
         bool read(std::uint64_t id,taskbar::Rectangle& box) const {
-            if(!id || id>c.bindings.size())return false;
+            if(!id || id>c.bindings.size() || generation!=c.generation)return false;
             const auto& binding=c.bindings[id-1];
             if(!binding.element.XamlRoot() || binding.element.XamlRoot()!=c.root.XamlRoot() || Media::VisualTreeHelper::GetParent(binding.element)!=binding.parent)return false;
             box=bounds(c,binding.element);return taskbar::valid(box);
         }
         bool write(std::uint64_t id,taskbar::Rectangle target) const {
-            if(!id || id>c.bindings.size() || !taskbar::inside(target,c.root.ActualWidth(),c.root.ActualHeight()))return false;
+            if(!id || id>c.bindings.size() || generation!=c.generation || !taskbar::inside(target,c.root.ActualWidth(),c.root.ActualHeight()))return false;
             const auto& binding=c.bindings[id-1];auto slot=binding.slot;
             slot.X+=static_cast<float>(target.x-binding.measured.x);slot.Y+=static_cast<float>(target.y-binding.measured.y);
             binding.element.Arrange(slot);return true;
@@ -117,18 +138,28 @@ class Session {
     static void apply(Control& c) noexcept {
         if(!c.active || c.writing || !c.request.count)return;
         try {
+            Value layout{nullptr},source{nullptr};
+            winrt::check_hresult(repeater::layout(c.repeater,layout));
+            winrt::check_hresult(repeater::itemsSource(c.repeater,source));
+            if(layout!=c.layout || source!=c.source || !c.root.Dispatcher().HasThreadAccess() ||
+                !c.root.XamlRoot() || c.root.XamlRoot()!=c.repeater.XamlRoot() || c.root.XamlRoot()!=c.tray.XamlRoot())
+                winrt::throw_hresult(E_ABORT);
             // LayoutUpdated is a notification, never a polling timer. A stable
             // verified pass performs no writes and no tree scan.
-            if(c.appliedGeneration==c.generation && !c.confirmed.empty()) {
+            if(c.appliedGeneration==c.generation && !c.confirmed.empty() &&
+                c.repeaterChildren==Media::VisualTreeHelper::GetChildrenCount(c.repeater) &&
+                c.trayChildren==Media::VisualTreeHelper::GetChildrenCount(c.tray)) {
                 bool stable=true;
                 for(const auto& move:c.confirmed) {
-                    if(move.instance>c.bindings.size() || !taskbar::same(bounds(c,c.bindings[move.instance-1].element),move.after)){stable=false;break;}
+                    if(move.instance>c.bindings.size() || c.bindings[move.instance-1].element.Visibility()!=Visibility::Visible || !taskbar::same(bounds(c,c.bindings[move.instance-1].element),move.after)){stable=false;break;}
                 }
                 if(stable)return;
             }
             c.writing=true;
             struct Finish {bool& flag;~Finish(){flag=false;}} finish{c.writing};
             c.bindings.clear();collect(c,c.repeater);collect(c,c.tray);
+            c.repeaterChildren=Media::VisualTreeHelper::GetChildrenCount(c.repeater);
+            c.trayChildren=Media::VisualTreeHelper::GetChildrenCount(c.tray);
             std::erase_if(c.roles,[&](const auto& cached){return std::none_of(c.bindings.begin(),c.bindings.end(),[&](const auto& binding){return binding.element==cached.item;});});
             std::vector<taskbar::MeasuredItem> items;items.reserve(c.bindings.size());
             for(size_t i=0;i<c.bindings.size();++i) {
@@ -137,21 +168,37 @@ class Session {
             std::vector<taskbar::Assignment> assignments;assignments.reserve(c.request.count);
             for(unsigned i=0;i<c.request.count;++i)assignments.push_back({taskbar::componentFromId(c.request.entries[i].id),static_cast<taskbar::Zone>(c.request.entries[i].zone)});
             const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap);
-            if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);c.status=HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);c.active=false;return;}
+            if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);fail(c,HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED));return;}
+            const auto width=c.root.ActualWidth(),height=c.root.ActualHeight();
+            if(c.budgetGeneration!=c.generation || c.budgetWidth!=width || c.budgetHeight!=height) {
+                c.budgetGeneration=c.generation;c.budgetWidth=width;c.budgetHeight=height;c.attempts=0;
+            }
+            // If an owner continually reinstates its positions, give up well
+            // before XAML reports a layout cycle. Events never reset this budget
+            // unless the source, requested configuration or owner size changes.
+            if(c.attempts>=3){c.failurePhase=6;fail(c,E_ABORT);return;}
+            ++c.attempts;
             Adapter adapter{c};
             const auto result=taskbar::transact(plan.moves,adapter);
-            if(result!=taskbar::Transaction::Applied){if(!c.failurePhase)c.failurePhase=5;c.status=result==taskbar::Transaction::RollbackFailed?E_UNEXPECTED:E_ABORT;c.active=false;return;}
+            if(result!=taskbar::Transaction::Applied){if(!c.failurePhase)c.failurePhase=5;fail(c,result==taskbar::Transaction::RollbackFailed?E_UNEXPECTED:E_ABORT);return;}
             c.confirmed=plan.moves;c.appliedGeneration=c.generation;c.status=S_OK;++c.passes;
-        }catch(...){c.status=winrt::to_hresult();c.active=false;}
+        }catch(...){fail(c,winrt::to_hresult());}
     }
-    bool install(const std::shared_ptr<Control>& c,const Value& creating) {
-        attached_=winrt::make_self<layout_contract::Attached>();attached_->original=original_;
+    bool install(const std::shared_ptr<Control>& c) {
+        winrt::check_hresult(repeater::layout(c->repeater,c->layout));
+        winrt::check_hresult(repeater::itemsSource(c->repeater,c->source));
+        if(!c->layout || !c->source)return false;
         const std::weak_ptr<Control> weak=c;
-        attached_->arrangeCallback=[weak](const auto&,auto size) {if(auto state=weak.lock())++state->generation;return size;};
-        layout_=attached_->create(creating);control_=c;
-        pin();
+        control_=c;pin();
+        notifications_=c->source.try_as<Interop::INotifyCollectionChanged>();
+        if(notifications_)changed_=notifications_.CollectionChanged([weak](auto&&,auto&&){if(auto state=weak.lock())++state->generation;});
+        else {
+            vector_=c->source.try_as<winrt::Windows::Foundation::Collections::IObservableVector<Value>>();
+            if(!vector_)return false;
+            changed_=vector_.VectorChanged([weak](auto&&,auto&&){if(auto state=weak.lock())++state->generation;});
+        }
+        modelSubscribed_=true;
         updated_=c->root.LayoutUpdated([weak](auto&&,auto&&){if(auto state=weak.lock())apply(*state);});subscribed_=true;
-        layout_contract::set(c->repeater,layout_);
         return true;
     }
 public:
@@ -159,14 +206,17 @@ public:
     ~Session(){reset();}
     HRESULT configure(HWND,const ComponentLayoutRequest& request) noexcept {
         if(!validComponentLayout(request))return E_INVALIDARG;
-        if(!request.count && !request.flags)return reset()?S_OK:E_ABORT;
+        if(!request.count)return reset()?S_OK:E_ABORT;
         try {
             if(!control_)return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED); // Fixture must supply its own objects.
-            control_->request=request;control_->status=E_PENDING;control_->appliedGeneration=~0u;
-            layout_contract::invalidate(layout_,true);control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
+            if(!control_->active) {
+                const auto status=FAILED(control_->status)?control_->status:E_ABORT;
+                lastReport_=report(status);reset();return status;
+            }
+            control_->request=request;++control_->generation;control_->status=E_PENDING;control_->appliedGeneration=~0u;
+            control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
             apply(*control_);
-            const auto status=FAILED(attached_->failure)?attached_->failure:
-                request.flags ? (attached_->measures && attached_->arranges ? S_OK:E_ABORT) : control_->status;
+            const auto status=control_->status;
             if(FAILED(status)) {
                 // Preserve bounded diagnostics without retaining failed objects.
                 lastReport_=report(status);reset();
@@ -175,22 +225,32 @@ public:
         }catch(...){const auto error=winrt::to_hresult();reset();return error;}
     }
     bool reset() noexcept {
-        if(!control_){layout_=nullptr;original_=nullptr;attached_=nullptr;return true;}
+        if(!control_)return true;
         bool success=true;auto c=control_;c->active=false;
         try {if(subscribed_){c->root.LayoutUpdated(updated_);subscribed_=false;}}
         catch(...){success=false;}
         try {
-            // Restore only our layout, never overwrite a rebuilt owned view.
-            Value current{nullptr};winrt::check_hresult(repeater::layout(c->repeater,current));
-            if(current!=layout_)success=false;
-            else {layout_contract::set(c->repeater,original_);c->tray.InvalidateArrange();c->root.InvalidateMeasure();c->root.UpdateLayout();}
+            if(modelSubscribed_) {
+                if(notifications_)notifications_.CollectionChanged(changed_);
+                else if(vector_)vector_.VectorChanged(changed_);
+                modelSubscribed_=false;
+            }
         }catch(...){success=false;}
-        control_.reset();layout_=nullptr;original_=nullptr;attached_=nullptr;
+        try {
+            // Ask the unchanged owner to lay out its own objects again. Never
+            // replace Layout or overwrite a source/view rebuilt by its owner.
+            Value current{nullptr},source{nullptr};
+            winrt::check_hresult(repeater::layout(c->repeater,current));
+            winrt::check_hresult(repeater::itemsSource(c->repeater,source));
+            if(current!=c->layout || source!=c->source)success=false;
+            else {c->tray.InvalidateArrange();c->repeater.InvalidateArrange();c->root.InvalidateMeasure();c->root.UpdateLayout();}
+        }catch(...){success=false;}
+        control_.reset();notifications_=nullptr;vector_=nullptr;
         return success;
     }
     ComponentLayoutReport report(HRESULT status) const noexcept {
         ComponentLayoutReport result;result.status=status;
-        if(control_){result.bound=1;result.items=static_cast<unsigned>(control_->bindings.size());result.passes=control_->passes;result.failurePhase=control_->failurePhase;result.failureItem=control_->failureItem;}
+        if(control_){if(FAILED(control_->status))result.status=control_->status;result.bound=1;result.items=static_cast<unsigned>(control_->bindings.size());result.passes=control_->passes;result.failurePhase=control_->failurePhase;result.failureItem=control_->failureItem;}
         else if(FAILED(status)){result=lastReport_;result.status=status;result.bound=0;}
         return result;
     }

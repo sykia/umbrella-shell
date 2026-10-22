@@ -22,29 +22,29 @@ namespace umbrella::explorer::component_layout {
 struct ComponentLayoutFixture {
     static bool bind(Session& session,const FrameworkElement& root,const FrameworkElement& repeater,
         const Controls::StackPanel& tray,const Value& original,const Value& factory,
+        winrt::com_ptr<layout_contract::Attached>& baseline,Value& expectedLayout,
         const std::vector<std::pair<UIElement,taskbar::Component>>& roles) {
-        auto control=std::make_shared<Session::Control>();control->root=root;control->repeater=repeater;control->tray=tray;
-        for(const auto& [item,role]:roles)control->roles.push_back({item,role});
-        session.original_=original;
-        if(!session.install(control,factory))return false;
-        session.attached_->measureCallback=[](const auto& context,auto desired) {
-            for(const auto& item:layout_contract::elements(context))item.Measure({1000,48});
+        // The fixture owns this baseline layout. Session must only observe it.
+        baseline=winrt::make_self<layout_contract::Attached>();baseline->original=original;
+        auto realized=std::make_shared<std::vector<UIElement>>();
+        baseline->measureCallback=[realized](const auto& context,auto desired) {
+            *realized=layout_contract::elements(context);
+            for(const auto& item:*realized)item.Measure({1000,48});
             return desired;
         };
-        session.attached_->arrangeCallback=[weak=std::weak_ptr<Session::Control>(control)](const auto&,auto size) {
-            // Supply an owned horizontal baseline despite the empty offscreen
-            // realization viewport. This is not evidence of compatibility with Explorer.
-            if(auto state=weak.lock()) {
-                float x=0;
-                for(const auto& cached:state->roles)if(Media::VisualTreeHelper::GetParent(cached.item)==state->repeater) {
-                    cached.item.Arrange({x,0,80,48});x+=80;
-                }
-                ++state->generation;
-            }
+        baseline->arrangeCallback=[realized](const auto&,auto size) {
+            float x=0;
+            for(const auto& item:*realized){item.Arrange({x,0,80,48});x+=80;}
             return size;
         };
-        return true;
+        expectedLayout=baseline->create(factory);
+        layout_contract::set(repeater,expectedLayout);
+        root.InvalidateMeasure();root.UpdateLayout();
+        auto control=std::make_shared<Session::Control>();control->root=root;control->repeater=repeater;control->tray=tray;
+        for(const auto& [item,role]:roles)control->roles.push_back({item,role});
+        return session.install(control);
     }
+    static unsigned generation(const Session& session){return session.control_->generation;}
     static void addRole(Session& session,const UIElement& item,taskbar::Component role) {
         session.control_->roles.push_back({item,role});
     }
@@ -54,6 +54,8 @@ void exerciseLayoutRequest() {
     using namespace explorer;
     ComponentLayoutRequest request;
     require(validComponentLayout(request),"Owned fixture reset rejected");
+    request.flags=1;
+    require(!validComponentLayout(request),"Retired delegated-layout probe accepted");
     request.flags=2;
     require(!validComponentLayout(request),"Unknown fixture operation accepted");
     request={};request.count=1;wcscpy_s(request.entries[0].id,L"start");
@@ -306,16 +308,25 @@ void exerciseRepeaterContract() {
     view.Height(48);commonRoot.Children().Append(view);commonRoot.Children().Append(tray);source.Content(commonRoot);
     commonRoot.Measure({1000,48});commonRoot.Arrange({0,0,1000,48});commonRoot.UpdateLayout();
     explorer::component_layout::Session coordinated;
-    require(explorer::component_layout::ComponentLayoutFixture::bind(coordinated,commonRoot,view,tray,priorLayout,customFactory,
+    winrt::com_ptr<explorer::layout_contract::Attached> baseline;
+    explorer::repeater::Value observedLayout{nullptr};
+    require(explorer::component_layout::ComponentLayoutFixture::bind(coordinated,commonRoot,view,tray,priorLayout,customFactory,baseline,observedLayout,
         {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
          {attachedNew,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},{input,taskbar::Component::InputIndicators},
          {quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Shared-root native coordinator fixture did not bind");
+    const auto checkLayoutIdentity=[&] {
+        explorer::repeater::Value current{nullptr};
+        winrt::check_hresult(explorer::repeater::layout(instance,current));
+        require(current==observedLayout,"Coordinator replaced the owner's original Layout");
+    };
+    checkLayoutIdentity();
     explorer::ComponentLayoutRequest coordinatedRequest;
     const std::array<const wchar_t*,8> names{L"start",L"overflow",L"search",L"apps",L"quicksettings",L"taskview",L"input",L"clock"};
     const std::array<unsigned,8> zones{0,0,1,1,1,2,2,2};coordinatedRequest.count=8;
     for(unsigned i=0;i<8;++i){wcscpy_s(coordinatedRequest.entries[i].id,names[i]);coordinatedRequest.entries[i].zone=zones[i];}
     const auto coordinatedStatus=coordinated.configure(nullptr,coordinatedRequest);
     if(FAILED(coordinatedStatus))std::cerr<<"coordinator HRESULT="<<std::hex<<coordinatedStatus<<" phase="<<coordinated.report(coordinatedStatus).failurePhase<<" item="<<coordinated.report(coordinatedStatus).failureItem<<'\n';
+    checkLayoutIdentity();
     require(SUCCEEDED(coordinatedStatus),"Shared-root actual central/tray cross-zone layout or original XAML hit-testing refused");
     require(quick.TransformToVisual(commonRoot).TransformPoint({0,0}).X<700 && overflow.TransformToVisual(commonRoot).TransformPoint({0,0}).X<200,
         "Original tray controls did not leave the right-hand parent bounds");
@@ -325,12 +336,78 @@ void exerciseRepeaterContract() {
     coordinatedRequest.entries[4].zone=0;coordinatedRequest.entries[7].zone=0;
     require(SUCCEEDED(coordinated.configure(nullptr,coordinatedRequest)),"Second cross-zone native layout failed");
     Controls::Button newApp;newApp.Width(80);newApp.Height(48);
-    explorer::component_layout::ComponentLayoutFixture::addRole(coordinated,newApp,taskbar::Component::Applications);data.Append(newApp);
+    explorer::component_layout::ComponentLayoutFixture::addRole(coordinated,newApp,taskbar::Component::Applications);
+    const auto beforeModelChange=explorer::component_layout::ComponentLayoutFixture::generation(coordinated);
+    data.Append(newApp);
+    require(explorer::component_layout::ComponentLayoutFixture::generation(coordinated)>beforeModelChange,"Source event did not invalidate the layout cache");
     commonRoot.UpdateLayout();
     require(Media::VisualTreeHelper::GetParent(newApp)==view && coordinated.report(S_OK).items==9,"New native application did not join the coordinated model");
+    checkLayoutIdentity();
     require(coordinated.reset(),"Original public layout and tray slots did not restore");
+    checkLayoutIdentity();
     require(quick.TransformToVisual(commonRoot).TransformPoint({0,0}).X>800 && overflow.TransformToVisual(commonRoot).TransformPoint({0,0}).X>800,"Tray slots remained outside their original region after reset");
-    std::cout<<"Passed: coordinated original central/tray controls across all three regions, original XAML hit-testing/parents, dynamic app arrival and reset in an owned HWND.\n";
+    // A stale request must not replace a newer owner's source/layout in reset.
+    explorer::component_layout::Session staleOwner;
+    winrt::com_ptr<explorer::layout_contract::Attached> staleBaseline;
+    explorer::repeater::Value staleExpected{nullptr};
+    require(explorer::component_layout::ComponentLayoutFixture::bind(staleOwner,commonRoot,view,tray,priorLayout,customFactory,staleBaseline,staleExpected,{}),"Stale-owner fixture did not bind");
+    auto newerData=winrt::single_threaded_observable_vector<explorer::repeater::Value>();
+    Controls::Button newerButton;newerButton.Width(80);newerButton.Height(48);newerData.Append(newerButton);
+    winrt::check_hresult(reinterpret_cast<PutSource>(table[7])(contract.get(),winrt::get_abi(newerData)));
+    require(FAILED(staleOwner.configure(nullptr,coordinatedRequest)),"Rebuilt source accepted a stale cross-zone request");
+    explorer::repeater::Value retainedSource{nullptr},retainedLayout{nullptr};
+    winrt::check_hresult(explorer::repeater::itemsSource(instance,retainedSource));
+    winrt::check_hresult(explorer::repeater::layout(instance,retainedLayout));
+    require(retainedSource==newerData && retainedLayout==staleExpected,"Failure cleanup overwrote a newer owner");
+    commonRoot.UpdateLayout();
+    require(newerData.Size()==1 && newerData.GetAt(0)==newerButton,"Failure cleanup mutated the new source");
+    // A later layout failure must restore through the unchanged owner and stop
+    // applying, rather than enter an unbounded LayoutUpdated recovery loop.
+    winrt::check_hresult(reinterpret_cast<PutSource>(table[7])(contract.get(),winrt::get_abi(data)));
+    explorer::component_layout::Session failureSession;
+    winrt::com_ptr<explorer::layout_contract::Attached> failureBaseline;
+    explorer::repeater::Value failureExpected{nullptr};
+    require(explorer::component_layout::ComponentLayoutFixture::bind(failureSession,commonRoot,view,tray,priorLayout,customFactory,failureBaseline,failureExpected,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},
+         {input,taskbar::Component::InputIndicators},{quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Failure fixture did not bind");
+    require(SUCCEEDED(failureSession.configure(nullptr,coordinatedRequest)),"Failure fixture initial placement refused");
+    const auto confirmedPasses=failureSession.report(S_OK).passes;
+    commonRoot.Width(180);commonRoot.Measure({180,48});commonRoot.Arrange({0,0,180,48});commonRoot.UpdateLayout();
+    require(FAILED(failureSession.report(S_OK).status) && failureSession.report(S_OK).failurePhase!=0,"Narrower owner did not reject collisions");
+    for(unsigned i=0;i<3;++i)commonRoot.UpdateLayout();
+    require(failureSession.report(S_OK).passes==confirmedPasses,"Rejected layout retried on subsequent events");
+    require(overflow.TransformToVisual(tray).TransformPoint({0,0}).X==0 && clock.TransformToVisual(tray).TransformPoint({0,0}).X==136,
+        "Failed event did not return original tray controls to their owner slots");
+    winrt::check_hresult(explorer::repeater::layout(instance,retainedLayout));
+    require(retainedLayout==failureExpected && data.Size()==5,"Failed event replaced the original layout or model");
+    commonRoot.Width(1000);commonRoot.Measure({1000,48});commonRoot.Arrange({0,0,1000,48});
+    require(failureSession.reset(),"Failure session could not release observers");
+    // Simulate a second layout owner fighting the requested positions. This
+    // must stop within three attempts even with repeated LayoutUpdated events.
+    explorer::component_layout::Session competing;
+    winrt::com_ptr<explorer::layout_contract::Attached> competingBaseline;
+    explorer::repeater::Value competingExpected{nullptr};
+    bool forceOwner=false;
+    const auto forceToken=commonRoot.LayoutUpdated([&](auto&&,auto&&) {
+        if(!forceOwner)return;
+        float x=0;
+        for(auto button:{overflow,input,quick,clock}) {
+            button.Arrange({x,0,static_cast<float>(button.Width()),48});x+=static_cast<float>(button.Width());
+        }
+    });
+    require(explorer::component_layout::ComponentLayoutFixture::bind(competing,commonRoot,view,tray,priorLayout,customFactory,competingBaseline,competingExpected,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},
+         {input,taskbar::Component::InputIndicators},{quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Competing-owner fixture did not bind");
+    require(SUCCEEDED(competing.configure(nullptr,coordinatedRequest)),"Competing fixture initial placement refused");
+    forceOwner=true;
+    for(unsigned i=0;i<5;++i){tray.InvalidateArrange();commonRoot.UpdateLayout();}
+    const auto competingReport=competing.report(S_OK);
+    require(FAILED(competingReport.status) && competingReport.failurePhase==6 && competingReport.passes<=3,"Fighting owner did not stop within its layout budget");
+    forceOwner=false;commonRoot.LayoutUpdated(forceToken);
+    require(competing.reset(),"Competing-owner observer cleanup failed");
+    std::cout<<"Passed: coordinated original central/tray controls across all three regions, original XAML hit-testing/parents, unchanged owner Layout, dynamic app arrival and reset in an owned HWND.\n";
     source.Content(nullptr); source.Close();
     std::cout << "Passed: actual WinUI 2 model reorder/restore, original UIElement identities and native model indices in an owned source.\n";
     std::cout << "Passed: actual system WinUI 2 ItemsRepeater public layout/index contract; no Explorer attachment.\n";
