@@ -118,9 +118,9 @@ int main(int argc, char** argv) {
             "available":["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"]})").object().toVariantMap();
         QString monitor;
         if(quietPlacement) {
-            configuration["left"]=QStringList{"widgets","start","clock"};
+            configuration["left"]=QStringList{"widgets","start"};
             configuration["center"]=QStringList{"search","taskview","apps"};
-            configuration["right"]=QStringList{"network","volume","input","overflow","desktop"};
+            configuration["right"]=QStringList{"overflow","input","network","volume","clock","desktop"};
             configuration=QJsonObject::fromVariantMap(configuration).toVariantMap();
         }
         {

@@ -22,6 +22,19 @@ struct Adapter {
     bool accept(std::uint64_t) { return acceptAll; }
 };
 int main() {
+    const std::vector<MeasuredItem> conditionalTray{
+        {1,Component::TrayOverflow,{2308,0,32,48},true},
+        {2,Component::SystemIndicators,{2340,0,32,48},false},
+        {3,Component::InputIndicators,{2372,0,44,48},true},
+        {4,Component::QuickSettings,{2416,0,60,48},true},
+        {5,Component::Clock,{2476,0,72,48},true},
+        {6,Component::Desktop,{2548,0,12,48},true},
+        {7,Component::Start,{970,0,45,48},true}};
+    const std::vector<Assignment> trayRequest{{Component::TrayOverflow,Zone::Right},{Component::InputIndicators,Zone::Right},
+        {Component::QuickSettings,Zone::Right},{Component::Clock,Zone::Right},{Component::Desktop,Zone::Right},{Component::Start,Zone::Left}};
+    const auto conditional=plan(conditionalTray,trayRequest,2560,48,8);
+    require(conditional.status==PlanStatus::Ready,"Visible stationary system group blocked an unrelated Start move");
+    for(const auto& move:conditional.moves)require(move.instance!=2 && !intersects(move.after,conditionalTray[1].bounds),"Conditional system group was moved or covered");
     struct Model {
         std::vector<int> values{1,2,3,4};
         unsigned writes=0, failAt=0;
@@ -103,7 +116,11 @@ int main() {
     require(plan(items,request,300,48,8).status != PlanStatus::Ready, "overflow accepted");
     const std::array tray{Rectangle{940,0,60,48}};
     const auto collision = plan(items,request,1000,48,8,tray);
-    require(collision.status == PlanStatus::Collision && collision.moves.empty(), "tray obstacle ignored or rejected plan exposed writable moves");
+    require(collision.status == PlanStatus::Ready,"Right-edge obstacle was not reserved during packing");
+    for(const auto& move:collision.moves)require(!intersects(move.after,tray[0]),"Stationary tray obstacle was covered");
+    const std::array fullObstacle{Rectangle{0,0,1000,48}};
+    const auto noRoom=plan(items,request,1000,48,8,fullObstacle);
+    require(noRoom.status==PlanStatus::Collision && noRoom.moves.empty(),"Rejected plan exposed writable moves");
     const std::array absent{Assignment{Component::Clock,Zone::Right}};
     require(plan(items,absent,1000,48,8).status == PlanStatus::Missing, "absent conditional component invented");
     const std::array duplicate{request[0],request[0]};

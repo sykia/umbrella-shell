@@ -35,7 +35,7 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
         if (!items[i].instance || !inside(items[i].bounds, width, height)) return result;
         for (size_t j = 0; j < i; ++j) if (items[i].instance == items[j].instance) return result;
     }
-    struct Group { Assignment assignment; double left{}, right{}; unsigned count{}; };
+    struct Group { Assignment assignment; double left{}, right{}; unsigned count{}; double target{}; };
     std::vector<Group> groups;
     groups.reserve(request.size());
     result.moves.reserve(items.size());
@@ -58,10 +58,29 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
         groups.push_back(group);
     }
     std::array<double, 3> cursor{0, (width-widths[1])/2, width-widths[2]};
+    // Pack the right zone from its physical edge. Conditional native groups
+    // absent from the request remain fixed obstacles, not implicit moves.
+    double rightCursor=width;
+    for(auto group=groups.rbegin();group!=groups.rend();++group) {
+        if(group->assignment.zone!=Zone::Right)continue;
+        const auto extent=group->right-group->left;
+        double target=rightCursor-extent;
+        for(size_t pass=0;pass<=items.size()+obstacles.size();++pass) {
+            double next=target;
+            const auto avoid=[&](Rectangle obstacle) {
+                if(intersects({target,0,extent,height},obstacle))next=std::min(next,obstacle.x-gap-extent);
+            };
+            for(const auto& item:items)if(std::none_of(groups.begin(),groups.end(),[&](const auto& candidate){return candidate.assignment.role==item.role;}))avoid(item.bounds);
+            for(const auto obstacle:obstacles)avoid(obstacle);
+            if(next==target)break;
+            target=next;
+        }
+        group->target=target;rightCursor=target-gap;
+    }
     std::array<bool, maxReorderItems> selected{};
     for (const auto& group : groups) {
         const auto zone = static_cast<unsigned>(group.assignment.zone);
-        const double delta = cursor[zone] - group.left;
+        const double delta = (group.assignment.zone==Zone::Right?group.target:cursor[zone]) - group.left;
         for (size_t i = 0; i < items.size(); ++i) if (items[i].role == group.assignment.role) {
             const auto& item = items[i];
             auto destination = item.bounds; destination.x += delta;

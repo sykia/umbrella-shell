@@ -83,7 +83,7 @@ Rectangle {
             var ok = editor.system.applyComponentConfiguration(target, next)
             editor.applying = false
             editor.configuration = editor.currentConfiguration()
-            editor.feedback = ok ? (editor.system.status || "") : "Windows не подтвердила перемещение. Проверьте панель задач."
+            editor.feedback = editor.system.status || (ok ? "" : "Windows не подтвердила перемещение. Проверьте панель задач.")
         }
     }
     Connections {
