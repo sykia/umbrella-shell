@@ -81,9 +81,9 @@ TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
         status_=QStringLiteral("Explorer восстановил штатные позиции после изменения раскладки. Повторное применение отключено.");emit changed();
     };
     componentSession_.componentLost=componentLost;appearance_.setComponentLossHandler(componentLost);
-    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] { emit changed(); });
-    connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this] { emit changed(); });
-    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this] { emit changed(); });
+    connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] { componentCatalogue_.clear();emit changed(); });
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this] { componentCatalogue_.clear();emit changed(); });
+    connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this] { componentCatalogue_.clear();emit changed(); });
     const auto state = umbrella::platform::taskbarAutoHide();
     available_ = state.has_value();
     autoHide_ = state.value_or(false);
@@ -128,7 +128,9 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
     if (pending_) { QTimer::singleShot(300, this, [this, freshSession] { restoreSavedAppearance(freshSession); }); return true; }
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     restored_ = false;
-    if (!settings.value("resumeAppearance", settings.contains("edge")).toBool()) return true;
+    const bool restoreAppearance=settings.value("resumeAppearance",settings.contains("edge")).toBool();
+    const bool restoreComponents=settings.value("resumeComponents",restoreAppearance && !confirmedComponents_.isEmpty()).toBool();
+    if(!restoreAppearance && !restoreComponents)return true;
     const auto monitors = appearanceMonitors();
     if (monitors.isEmpty()) return false;
     available_ = umbrella::platform::taskbarAutoHide().has_value();
@@ -139,8 +141,9 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
         activeComponents_.clear();appearanceComponents_.clear();legacyTrayComponents_.clear();
         activeComponentConfiguration_.clear();activeComponentMonitor_.clear();
     }
-    const auto confirmed=confirmedComponents_;
-    if(confirmed.size()==1 && legacyComponentConfiguration(confirmed.first().toMap()) && confirmed.first().toMap()["left"].toStringList().contains("taskview")) {
+    const auto confirmed=restoreComponents?confirmedComponents_:QVariantMap{};
+    if(!restoreAppearance)return replayConfirmedComponents();
+    if(!settings.contains("resumeComponents") && confirmed.size()==1 && legacyComponentConfiguration(confirmed.first().toMap()) && confirmed.first().toMap()["left"].toStringList().contains("taskview")) {
         const bool applied=replayConfirmedComponents();
         return applied || !sidesAvailable();
     }
@@ -259,10 +262,13 @@ void TaskbarSettings::apply(const QString& edge, bool detached, int transparency
     if (edge != "bottom" && edge != "top" && edge != "left" && edge != "right") return;
     if (transparency < 0 || transparency > 100) return;
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
-    const QStringList keys{"appearanceProfilesV1", "edge", "detached", "transparency", "widthPercent", "thickness", "islands", "autoHide", "resumeAppearance", "confirmedComponentV1", "confirmedComponentsV2"};
+    const QStringList keys{"appearanceProfilesV1", "edge", "detached", "transparency", "widthPercent", "thickness", "islands", "autoHide", "resumeAppearance", "resumeComponents", "confirmedComponentV1", "confirmedComponentsV2"};
     QVariantMap previous;
     for (const auto& key : keys) if (settings.contains(key)) previous.insert(key, settings.value(key));
+    const auto componentRecords=confirmedComponents_;
     if (!resetComponentLayout()) return;
+    confirmedComponents_=componentRecords;
+    if(!persistConfirmedComponents()){status_=QStringLiteral("Не удалось сохранить порядок перед изменением оформления.");emit changed();return;}
     edge_ = edge; detached_ = detached; transparency_ = transparency; widthPercent_ = widthPercent; thickness_ = thickness; islands_ = islands;
     auto profiles = appearanceProfiles(settings);
     const auto old = legacyAppearance(settings);
@@ -452,6 +458,7 @@ bool TaskbarSettings::persistConfirmedComponents() {
     if(confirmedComponents_.size()>16 || bytes.size()>65536)return false;
     // Keep the last-record v1 mirror for older builds; v2 is authoritative.
     settings.setValue("confirmedComponentsV2",bytes);
+    settings.setValue("resumeComponents",!confirmedComponents_.isEmpty());
     if(confirmedComponents_.isEmpty())settings.remove("confirmedComponentV1");
     else {
         const auto id=confirmedComponents_.contains(activeComponentMonitor_)?activeComponentMonitor_:confirmedComponents_.firstKey();
@@ -460,12 +467,17 @@ bool TaskbarSettings::persistConfirmedComponents() {
     settings.sync();return settings.status()==QSettings::NoError;
 }
 bool TaskbarSettings::replayConfirmedComponents() {
-    const auto records=confirmedComponents_;bool ok=true;
+    const auto records=confirmedComponents_;bool ok=true;QStringList unavailable;
     for(const auto& entry:layoutMonitors()) {
         const auto id=entry.toMap()["id"].toString();const auto configuration=records.value(id).toMap();
-        if(!configuration.isEmpty() && !applyComponentConfiguration(id,configuration))ok=false;
+        if(!configuration.isEmpty() && !applyComponentConfiguration(id,configuration)) {
+            if(appearance_.nativeSessionActive())unavailable.append(entry.toMap()["label"].toString());
+            else ok=false;
+        }
     }
-    restored_=!activeComponents_.isEmpty();return ok;
+    restored_=appearance_.nativeSessionActive() || !activeComponents_.isEmpty();
+    if(!unavailable.isEmpty())status_=QStringLiteral("Оформление восстановлено. Сохранённый порядок временно несовместим с режимом панели: ")+unavailable.join(", ");
+    return ok;
 }
 QStringList TaskbarSettings::componentIds(const QString& monitor,bool refresh) {
     QString device;bool primary=false;
@@ -538,7 +550,10 @@ bool TaskbarSettings::applyComponentConfiguration(const QString& monitor,const Q
     activeComponentConfiguration_=configuration;activeComponentMonitor_=monitor;
     bool saved=persistConfirmedComponents() && saveComponentDraft(monitor,configuration);
     QSettings settings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
-    settings.setValue("resumeAppearance",true);settings.sync();
+    // Saving component-only placement must not resurrect an old disabled
+    // islands/size profile at the next launch.
+    settings.setValue("resumeComponents",true);
+    settings.setValue("resumeAppearance",appearance_.nativeSessionActive());settings.sync();
     saved=saved && settings.status()==QSettings::NoError && setResumeAtLogin(true);
     status_=saved?QString():QStringLiteral("Расположение применено, но сохранить его не удалось.");
     emit changed();return true;
@@ -563,10 +578,9 @@ bool TaskbarSettings::restoreComponentConfiguration(const QString& monitor) {
     if(activeComponentMonitor_==monitor){activeComponentMonitor_.clear();activeComponentConfiguration_.clear();}
     const bool persisted=persistConfirmedComponents();
     settings.setValue("componentDraftsV1",QJsonDocument(all).toJson(QJsonDocument::Compact));
-    const bool stopResume=confirmedTarget && confirmedComponents_.isEmpty();
-    if(stopResume)settings.setValue("resumeAppearance",false);
     settings.sync();
-    const bool saved=persisted && settings.status()==QSettings::NoError && (!stopResume || setResumeAtLogin(false));
+    const bool resume=settings.value("resumeAppearance",false).toBool() || !confirmedComponents_.isEmpty() || settings.value("dock/enabled",false).toBool();
+    const bool saved=persisted && settings.status()==QSettings::NoError && (!confirmedTarget || setResumeAtLogin(resume));
     status_ = saved ? QString() : QStringLiteral("Исходный вид возвращён, но сохранённые настройки не удалены.");
     emit changed(); return saved;
 }

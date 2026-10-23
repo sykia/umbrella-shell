@@ -48,6 +48,11 @@ int main(int argc, char** argv) {
     if (!quietTray && ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000)) return 2;
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) { std::fprintf(stderr, "%s\n", message.toUtf8().constData()); });
     QGuiApplication app(argc,argv);
+    struct DesktopExit {
+        HWND foreground;POINT cursor{};bool restore;
+        ~DesktopExit(){if(restore){SetCursorPos(cursor.x,cursor.y);if(IsWindow(foreground))SetForegroundWindow(foreground);}}
+    } desktopExit{GetForegroundWindow(),{},!quietTray};
+    GetCursorPos(&desktopExit.cursor);
     if (app.arguments().size()!=2) return 2;
     qputenv("QT_QUICK_CONTROLS_STYLE","Basic");
     const HRESULT initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
@@ -133,6 +138,13 @@ int main(int argc, char** argv) {
                 else {secondaryId=id;secondaryDevice=monitor["device"].toString();secondaryProfile=profile(ids,false);}
             }
             if(primaryId.isEmpty() || secondaryId.isEmpty())return 77;
+            // A disabled historical islands profile must survive component-only
+            // editing without being silently re-enabled during restart replay.
+            QJsonObject disabledProfiles;
+            const QJsonObject disabled{{"edge","bottom"},{"detached",true},{"widthPercent",100},{"thickness",64},{"islands",true},{"transparency",0}};
+            disabledProfiles.insert(primaryId,disabled);disabledProfiles.insert(secondaryId,disabled);
+            QSettings previous(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+            previous.setValue("appearanceProfilesV1",QJsonDocument(disabledProfiles).toJson(QJsonDocument::Compact));previous.setValue("resumeAppearance",false);previous.sync();
             if(!model.applyComponentConfiguration(primaryId,primaryProfile) || !model.applyComponentConfiguration(secondaryId,secondaryProfile)){
                 std::fprintf(stderr,"Two-panel placement: %s\n",model.status().toUtf8().constData());return 31;
             }
@@ -144,6 +156,7 @@ int main(int argc, char** argv) {
             if(primaryProfile["left"].toList().contains("systemtray") && x(moved[primaryDevice],"systemtray")>=400)return 34;
             QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
             if(QJsonDocument::fromJson(saved.value("confirmedComponentsV2").toByteArray()).object().size()!=2)return 35;
+            if(saved.value("resumeAppearance",true).toBool() || !saved.value("resumeComponents",false).toBool() || QJsonDocument::fromJson(saved.value("appearanceProfilesV1").toByteArray()).object()!=disabledProfiles)return 35;
         }
         QTest::qWait(1300);if(snapshot()!=beforeAll)return 36;
         {
@@ -237,7 +250,7 @@ int main(int argc, char** argv) {
             if(!restarted.restoreComponentConfiguration(monitor) || snapshot()!=original)return 17;
         }
         QSettings state(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
-        if(state.contains("confirmedComponentV1") || state.value("resumeAppearance",true).toBool() || GetForegroundWindow()!=foreground){
+        if(state.contains("confirmedComponentV1") || state.value("resumeComponents",true).toBool() || !state.value("resumeAppearance",false).toBool() || GetForegroundWindow()!=foreground){
             std::printf("Tray reset diagnostics: confirmed=%u resume=%u foreground=%u\n",state.contains("confirmedComponentV1"),state.value("resumeAppearance",true).toBool(),GetForegroundWindow()==foreground);return 18;
         }
         std::puts("Passed: real component placement through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
@@ -267,7 +280,7 @@ int main(int argc, char** argv) {
     const QPoint start=center(source), target=zone->mapToScene(QPointF(zone->width()/2,105)).toPoint();
     QTest::mousePress(&view,Qt::LeftButton,Qt::NoModifier,start);
     for (int i=1;i<=12;++i) { QTest::mouseMove(&view,start+(target-start)*i/12); QTest::qWait(20); }
-    QTest::mouseRelease(&view,Qt::LeftButton,Qt::NoModifier,target); QTest::qWait(220);
+    QTest::mouseRelease(&view,Qt::LeftButton,Qt::NoModifier,target); QTest::qWait(1300);
     const auto monitors=model.layoutMonitors();
     const auto primaryId=model.activeComponentMonitor();
     const auto saved=model.componentDraft(primaryId);
@@ -290,7 +303,7 @@ int main(int argc, char** argv) {
     std::printf("settings drafts: saved/reloaded=1 monitorIsolation=1 monitors=%lld invalidRejected=1\n",static_cast<long long>(monitors.size()));
     // Release is the only user action; auto-apply has already acknowledged and saved.
     if (model.activeComponentConfiguration()!=saved) return 5;
-    auto unsupported=saved; unsupported.insert("left",QVariantList{QStringLiteral("taskview"),QStringLiteral("widgets")});
+    auto unsupported=saved; unsupported.insert("version",2);
     if (model.applyComponentConfiguration(primaryId,unsupported) || model.componentDraft(primaryId)!=saved) return 5;
     std::printf("auto apply: available=%u status=%s\n",root->property("nativeAvailable").toBool()?1u:0u,model.status().toUtf8().constData());
     RECT moved{},panel{};
@@ -335,7 +348,7 @@ int main(int argc, char** argv) {
     }
     std::printf("settings integration: originalTaskViewClick=%u\n",nativeClick?1u:0u);
     SetCursorPos(cursor.x,cursor.y);
-    QTest::mouseClick(&view,Qt::LeftButton,Qt::NoModifier,center(reset)); QTest::qWait(250);
+    QTest::mouseClick(&view,Qt::LeftButton,Qt::NoModifier,center(reset)); QTest::qWait(1300);
     RECT after{};
     const bool restored=model.componentDraft(primaryId).isEmpty() && SUCCEEDED(button->get_CurrentBoundingRectangle(&after)) && EqualRect(&before,&after);
     std::printf("settings integration: reset=%u warnings=%u\n",restored?1u:0u,warning?1u:0u);
@@ -344,12 +357,16 @@ int main(int argc, char** argv) {
     confirmedForRestart=saved; confirmedMonitor=primaryId;
     }
     // A new owner may replay only the native-confirmed scenario, not arbitrary drafts.
+    QTest::qWait(1300);
     TaskbarSettings restarted;
     if (!restarted.restoreSavedAppearance() || restarted.activeComponentConfiguration()!=confirmedForRestart ||
         restarted.activeComponentMonitor()!=confirmedMonitor) return 7;
+    QTest::qWait(1300);
     RECT replayed{};
     if (FAILED(button->get_CurrentBoundingRectangle(&replayed)) || replayed.left==before.left) return 8;
     if (!restarted.restoreComponentConfiguration(confirmedMonitor)) return 9;
+    QTest::qWait(1300);
+    RECT resetReplay{};if(FAILED(button->get_CurrentBoundingRectangle(&resetReplay)) || !EqualRect(&before,&resetReplay))return 9;
     QSettings settings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
     if (settings.value("resumeAppearance",true).toBool() || settings.contains("confirmedComponentV1")) return 10;
     std::puts("settings integration: confirmedRestartReplay=1 explicitResetDisablesResume=1");

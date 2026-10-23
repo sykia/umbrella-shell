@@ -238,3 +238,6 @@ confirmedComponentV1. Перед восстановлением нового п�
 GUI использует slots через общий native-host либо --components без экспериментального 60-секундного ограничения. Поздний отказ отправляет одно уведомление slots-lost с serial; Qt отбрасывает устаревшие уведомления по serial и поколению процесса. Новые применения сохраняются в existing confirmedComponentV1 только после ack; второй монитор в GUI пока закрыт для новых переносов.
 
 Component placement теперь хранит active/confirmed maps по устойчивому monitor id, confirmedComponentsV2 ограничен 16 записями/64 KiB; v1 мигрирует без удаления отключённых мониторов. UI читает кэшированный read-only каталог по device и явно обновляет его. LayoutUpdated сравнивает подтверждённые layout slots, а не промежуточный compositor animation offset; SizeChanged трея и model events инвалидируют состояние. Native операции остаются в единственной текущей сессии, reset и потеря подтверждения адресованы конкретной панели.
+
+
+Resume компонентов и оформления имеют независимые флаги. Изменение оформления сохраняет confirmed map даже при несовместимом native replay. План placement рассчитывается по цепочке ActualOffset исходных родителей; presented bounds оставлены для проверки hit-testing. Последняя правка геометрии проверена fixtures, повторная desktop-проверка остаётся обязательной.

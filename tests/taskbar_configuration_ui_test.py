@@ -19,6 +19,8 @@ class Backend(QObject):
         self.active = {}
         self.active_monitor = ""
         self.configurations = {}
+        self.ids = {"one":["widgets","start","search","taskview","apps","overflow","input","network","volume","clock","desktop"],
+                    "two":["widgets","start","search","taskview","apps","clock"]}
         self.apply_ok = True
         self.status_text = ""
         self.busy = False
@@ -31,6 +33,9 @@ class Backend(QObject):
     activeComponentMonitor = Property(str, lambda self: self.active_monitor, notify=changed)
     activeComponentConfigurations = Property("QVariantMap", lambda self: self.configurations, notify=changed)
     status = Property(str, lambda self: self.status_text, notify=changed)
+    @Slot(str, bool, result="QStringList")
+    def componentIds(self, monitor, refresh):
+        return self.ids.get(monitor, [])
     @Slot(str, "QVariantMap", result=bool)
     def applyComponentConfiguration(self, monitor, configuration):
         self.calls.append((monitor, configuration["gap"]))
@@ -124,6 +129,12 @@ def main():
     require(backend.calls == [("one",8)], "drop did not automatically apply exactly once")
     require(config()["left"] == ["widgets","taskview"] and backend.drafts["one"] == config(), "confirmed configuration not saved")
     applied = config()
+    backend.ids["one"].append("systemtray")
+    root.refreshComponents()
+    require(config()==applied and "systemtray" in config()["available"],"new optional group displayed an unconfirmed placement")
+    require(root.moveComponent("systemtray","left",2),"detected optional group could not be placed")
+    root.discardQueuedApply()
+    backend.ids["one"].remove("systemtray");root.refreshComponents()
     # Coalesce successive gap edits into one command; displayed layout stays confirmed.
     for gap in (12,16,24):
         next_config = dict(applied); next_config["gap"] = gap

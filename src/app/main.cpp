@@ -72,7 +72,7 @@ int main(int argc, char* argv[]) {
     }
     if (resume) {
         QSettings saved(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
-        if (!saved.value("resumeAppearance", saved.contains("edge")).toBool() && !saved.value("dock/enabled", false).toBool()) return 0;
+        if (!saved.value("resumeAppearance", saved.contains("edge")).toBool() && !saved.value("resumeComponents",false).toBool() && !saved.value("dock/enabled", false).toBool()) return 0;
     }
     app.setWindowIcon(QIcon(":/assets/umbrella.png"));
     TaskbarSettings taskbarSettings;

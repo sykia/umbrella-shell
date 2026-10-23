@@ -44,7 +44,8 @@ function remaining(items,id) { var group=dragIds(id); return items.filter(v => g
 function nativeConfiguration(value, primary, ids) {
     if (!valid(value)) return false
     if (primary===undefined) primary=true
-    if (JSON.stringify(value.available)!==JSON.stringify(defaults(primary,ids).available) || (value.right.indexOf("desktop")>=0 && value.right[value.right.length-1]!=="desktop")) return false
+    var managed=id => id!=="systemtray" && id!=="trayapps"
+    if (JSON.stringify(value.available.filter(managed))!==JSON.stringify(defaults(primary,ids).available.filter(managed)) || (value.right.indexOf("desktop")>=0 && value.right[value.right.length-1]!=="desktop")) return false
     return ["left","center","right"].every(function(zone) {
         var list=value[zone], network=list.indexOf("network"), volume=list.indexOf("volume")
         return (network<0 && volume<0) || (network>=0 && volume===network+1)
@@ -67,7 +68,14 @@ function reconcile(value, primary, ids) {
     for(var zone of ["left","center","right"])value[zone].forEach(id => {
         if(ids.indexOf(id)>=0){next[zone].push(id);placed.push(id)}
     })
-    for(var key of ["left","center","right"])base[key].forEach(id => {if(placed.indexOf(id)<0)next[key].push(id)})
+    for(var key of ["left","center","right"])base[key].forEach(id => {
+        if(placed.indexOf(id)>=0)return
+        // A newly discovered optional group stays unmanaged until the user
+        // places it, rather than displaying an unconfirmed new position.
+        if((id==="systemtray" || id==="trayapps") && value.available.indexOf(id)>=0)next.available.push(id)
+        else next[key].push(id)
+    })
+    next.available.sort((a,b) => catalog.indexOf(component(a))-catalog.indexOf(component(b)))
     if(next.right.indexOf("desktop")>=0){next.right=next.right.filter(id=>id!=="desktop");next.right.push("desktop")}
     return next
 }

@@ -85,6 +85,18 @@ class Session {
     }
     static taskbar::Rectangle bounds(const Control& c,const UIElement& item) {
         const auto element=item.as<FrameworkElement>();
+        double x=0,y=0;DependencyObject node=item;
+        for(unsigned depth=0;node && node!=c.root && depth<64;++depth) {
+            const auto current=node.as<UIElement>();const auto offset=current.ActualOffset();
+            x+=offset.x;y+=offset.y;node=Media::VisualTreeHelper::GetParent(node);
+        }
+        if(node!=c.root)winrt::throw_hresult(E_ABORT);
+        // ActualOffset is the arrange result. TransformToVisual can contain a
+        // transient compositor/theme translation from an earlier placement.
+        return {x,y,element.ActualWidth(),element.ActualHeight()};
+    }
+    static taskbar::Rectangle presentedBounds(const Control& c,const UIElement& item) {
+        const auto element=item.as<FrameworkElement>();
         const auto box=element.TransformToVisual(c.root).TransformBounds({0,0,static_cast<float>(element.ActualWidth()),static_cast<float>(element.ActualHeight())});
         return {box.X,box.Y,box.Width,box.Height};
     }
@@ -166,7 +178,7 @@ class Session {
         }
         bool accept(std::uint64_t id) const {
             taskbar::Rectangle box;
-            const bool accepted=read(id,box) && c.bindings[id-1].element.IsHitTestVisible() && hit(c,c.bindings[id-1].element,box);
+            const bool accepted=read(id,box) && c.bindings[id-1].element.IsHitTestVisible() && hit(c,c.bindings[id-1].element,presentedBounds(c,c.bindings[id-1].element));
             if(!accepted){c.failurePhase=4;c.failureItem=static_cast<unsigned>(id);}
             return accepted;
         }
@@ -192,10 +204,12 @@ class Session {
                     const auto& binding=c.bindings[move.instance-1];
                     const auto slot=Controls::Primitives::LayoutInformation::GetLayoutSlot(binding.element.as<FrameworkElement>());
                     const auto expected=binding.committedSlot;
+                    const auto element=binding.element.as<FrameworkElement>();
                     // Native compositor animations may still be travelling to
                     // the committed slot. Re-arranging from animated bounds
                     // fights Explorer and can invalidate an otherwise valid move.
                     if(binding.element.Visibility()!=Visibility::Visible || Media::VisualTreeHelper::GetParent(binding.element)!=binding.parent ||
+                        std::abs(element.ActualWidth()-move.after.width)>.5 || std::abs(element.ActualHeight()-move.after.height)>.5 ||
                         !taskbar::same({slot.X,slot.Y,slot.Width,slot.Height},{expected.X,expected.Y,expected.Width,expected.Height})) {stable=false;break;}
                 }
                 if(stable)return;
@@ -320,7 +334,7 @@ public:
             }
             control_->request=request;++control_->generation;control_->status=E_PENDING;control_->appliedGeneration=~0u;
             control_->windowStart=GetTickCount64();control_->windowAttempts=0;
-            control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
+            control_->tray.InvalidateArrange();control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
             apply(*control_);
             const auto status=control_->status;
             if(FAILED(status)) {

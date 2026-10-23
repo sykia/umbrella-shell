@@ -41,12 +41,14 @@ Rectangle {
         return LayoutModel.reconcile(live ? LayoutModel.clone(live) : null,monitor ? monitor.primary : true,actualIds)
     }
     function loadMonitor() {
-        if (!monitor || loadedMonitor === monitor.id) return
+        if (!monitor) return
+        var signature=monitor.id+":"+(monitor.device || "")+":"+monitor.primary
+        if(loadedMonitor===signature)return
         cancelDrag()
         // A queued drop belongs to the monitor on which it was made. Switching
         // screens cancels it before the delayed apply can change another panel.
         discardQueuedApply()
-        loadedMonitor = monitor.id
+        loadedMonitor = signature
         actualIds = system && typeof system.componentIds === "function" ? Array.from(system.componentIds(monitor.id,false)) : null
         configuration = currentConfiguration()
         feedback = ""

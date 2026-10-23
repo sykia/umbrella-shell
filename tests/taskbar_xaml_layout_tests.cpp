@@ -46,6 +46,10 @@ struct ComponentLayoutFixture {
         return session.install(control);
     }
     static unsigned generation(const Session& session){return session.control_->generation;}
+    static double expectedX(const Session& session,const UIElement& element) {
+        for(const auto& move:session.control_->confirmed)if(session.control_->bindings[move.instance-1].element==element)return move.after.x;
+        winrt::throw_hresult(E_UNEXPECTED);
+    }
     static void addRole(Session& session,const UIElement& item,taskbar::Component role) {
         session.control_->roles.push_back({item,role});
     }
@@ -338,7 +342,12 @@ void exerciseRepeaterContract() {
     require(coordinated.report(S_OK).passes<8,"Stable cross-zone layout repeated without a native invalidation");
     coordinatedRequest.entries[0].zone=2;coordinatedRequest.entries[3].zone=2;
     coordinatedRequest.entries[4].zone=0;coordinatedRequest.entries[7].zone=0;
+    const auto originalRender=attachedFirst.RenderTransform();Media::TranslateTransform inFlight;
+    inFlight.X(5);attachedFirst.RenderTransform(inFlight);
     require(SUCCEEDED(coordinated.configure(nullptr,coordinatedRequest)),"Second cross-zone native layout failed");
+    const auto expectedX=explorer::component_layout::ComponentLayoutFixture::expectedX(coordinated,attachedFirst);
+    attachedFirst.RenderTransform(originalRender);
+    require(std::abs(attachedFirst.TransformToVisual(commonRoot).TransformPoint({0,0}).X-expectedX)<.5,"In-flight animation was persisted as a layout-slot offset");
     Controls::Button newApp;newApp.Width(80);newApp.Height(48);
     explorer::component_layout::ComponentLayoutFixture::addRole(coordinated,newApp,taskbar::Component::Applications);
     const auto beforeModelChange=explorer::component_layout::ComponentLayoutFixture::generation(coordinated);
