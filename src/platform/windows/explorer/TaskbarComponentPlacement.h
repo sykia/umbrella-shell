@@ -34,6 +34,8 @@ class Session {
         Value layout{nullptr},source{nullptr};
         int repeaterChildren=-1,trayChildren=-1;
         ComponentLayoutRequest request;
+        taskbar::Rectangle viewport; // Root-relative DIP, supplied by the owning geometry transaction.
+        double viewportRootWidth=0,viewportRootHeight=0;
         HRESULT status=E_PENDING;
         unsigned passes=0,generation=0,appliedGeneration=~0u;
         unsigned attempts=0;
@@ -233,7 +235,14 @@ class Session {
                 if(std::any_of(c.bindings.begin(),c.bindings.end(),[&](const auto& binding){return binding.role==requested;}))
                     assignments.push_back({requested,static_cast<taskbar::Zone>(c.request.entries[i].zone)});
             }
-            const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap);
+            auto viewport=c.viewport;
+            // Preserve measured edge insets during an owner resize. Reusing the
+            // old absolute bottom/right edge rejects valid newly-centred slots.
+            if(viewport.width!=0 || viewport.height!=0 || viewport.x!=0 || viewport.y!=0) {
+                viewport.width+=c.root.ActualWidth()-c.viewportRootWidth;
+                viewport.height+=c.root.ActualHeight()-c.viewportRootHeight;
+            }
+            const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap,{},viewport);
             if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);fail(c,HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED));return;}
             // If an owner continually reinstates its positions, give up well
             // before XAML reports a layout cycle. Source reset/resize events must
@@ -323,26 +332,59 @@ public:
     void notifyFailure(HWND owner,HWND target,unsigned serial) noexcept {
         if(control_ && control_->active){control_->notificationOwner=owner;control_->notificationTarget=target;control_->notificationSerial=serial;}
     }
-    HRESULT configure(HWND hwnd,const ComponentLayoutRequest& request) noexcept {
+    HRESULT configure(HWND hwnd,const ComponentLayoutRequest& request,taskbar::Rectangle viewport={}) noexcept {
         if(!validComponentLayout(request))return E_INVALIDARG;
         if(!request.count)return reset()?S_OK:E_ABORT;
+        HWND interruptedOwner{},interruptedTarget{};unsigned interruptedSerial=0;
         try {
             if(!control_ && !bind(hwnd)){reset();return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);}
             if(!control_->active) {
                 const auto status=FAILED(control_->status)?control_->status:E_ABORT;
                 lastReport_=report(status);reset();return status;
             }
-            control_->request=request;++control_->generation;control_->status=E_PENDING;control_->appliedGeneration=~0u;
+            const auto previousRequest=control_->request;
+            const auto previousViewport=control_->viewport;
+            const auto previousRootWidth=control_->viewportRootWidth,previousRootHeight=control_->viewportRootHeight;
+            const auto previousOwner=control_->notificationOwner;
+            interruptedOwner=previousOwner;interruptedTarget=control_->notificationTarget;
+            interruptedSerial=control_->notificationSerial;
+            // An uncommitted candidate must not invalidate the previous serial.
+            // Publish loss only if restoring that committed layout also fails.
+            control_->notificationOwner=nullptr;
+            control_->request=request;control_->viewport=viewport;
+            control_->viewportRootWidth=control_->root.ActualWidth();control_->viewportRootHeight=control_->root.ActualHeight();
+            ++control_->generation;control_->status=E_PENDING;control_->appliedGeneration=~0u;
             control_->windowStart=GetTickCount64();control_->windowAttempts=0;
             control_->tray.InvalidateArrange();control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
             apply(*control_);
             const auto status=control_->status;
             if(FAILED(status)) {
                 // Preserve bounded diagnostics without retaining failed objects.
-                lastReport_=report(status);reset();
+                lastReport_=report(status);
+                if(previousRequest.count) {
+                    control_->active=true;control_->request=previousRequest;control_->viewport=previousViewport;
+                    control_->viewportRootWidth=previousRootWidth;control_->viewportRootHeight=previousRootHeight;
+                    ++control_->generation;control_->appliedGeneration=~0u;control_->status=E_PENDING;
+                    control_->failurePhase=0;control_->failureItem=0;
+                    control_->tray.InvalidateArrange();control_->repeater.InvalidateMeasure();control_->root.UpdateLayout();
+                    apply(*control_);
+                    if(SUCCEEDED(control_->status)) {
+                        control_->notificationOwner=previousOwner;
+                        return status; // Candidate refused; previous layout remains live.
+                    }
+                }
+                if(previousOwner)PostMessageW(previousOwner,placementLostMessage,control_->notificationSerial,
+                    reinterpret_cast<LPARAM>(control_->notificationTarget));
+                reset();
+            } else {
+                control_->notificationOwner=previousOwner;
             }
             return status;
-        }catch(...){const auto error=winrt::to_hresult();reset();return error;}
+        }catch(...){
+            const auto error=winrt::to_hresult();reset();
+            if(interruptedOwner)PostMessageW(interruptedOwner,placementLostMessage,interruptedSerial,reinterpret_cast<LPARAM>(interruptedTarget));
+            return error;
+        }
     }
     bool reset() noexcept {
         if(!control_)return true;
@@ -372,6 +414,9 @@ public:
     }
     ComponentLayoutReport report(HRESULT status) const noexcept {
         ComponentLayoutReport result;result.status=status;
+        if(FAILED(status) && control_ && SUCCEEDED(control_->status) && lastReport_.status==status) {
+            result=lastReport_;result.bound=1;return result;
+        }
         if(control_){if(FAILED(control_->status))result.status=control_->status;result.bound=1;result.items=static_cast<unsigned>(control_->bindings.size());result.passes=control_->passes;result.failurePhase=control_->failurePhase;result.failureItem=control_->failureItem;}
         else if(FAILED(status)){result=lastReport_;result.status=status;result.bound=0;}
         return result;

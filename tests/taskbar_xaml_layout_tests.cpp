@@ -340,6 +340,44 @@ void exerciseRepeaterContract() {
         "Original tray controls did not leave the right-hand parent bounds");
     require(Media::VisualTreeHelper::GetParent(quick)==tray && Media::VisualTreeHelper::GetParent(attachedSecond)==view,"Cross-zone placement reparented original controls");
     require(coordinated.report(S_OK).passes<8,"Stable cross-zone layout repeated without a native invalidation");
+    // The same native objects and original Layout survive geometry changes.
+    // HWND remains offscreen; neither Explorer nor global input is touched.
+    const auto geometryTurn=[] {
+        MSG message{};
+        while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+    };
+    for (const double thickness : {64.,96.,48.}) {
+        geometryTurn(); // Do not override the child's owner-controlled size.
+        commonRoot.Height(thickness);commonRoot.Width(900);
+        commonRoot.Measure({900,static_cast<float>(thickness)});
+        commonRoot.Arrange({0,0,900,static_cast<float>(thickness)});commonRoot.UpdateLayout();
+        const auto geometryStatus=coordinated.configure(nullptr,coordinatedRequest,{16,0,868,thickness});
+        if(FAILED(geometryStatus))std::cerr<<"geometry="<<thickness<<" phase="<<coordinated.report(geometryStatus).failurePhase
+            <<" item="<<coordinated.report(geometryStatus).failureItem<<" status="<<std::hex<<geometryStatus<<std::dec<<'\n';
+        require(SUCCEEDED(geometryStatus),
+            "Measured native slots failed after width/thickness change");
+        require(std::abs(explorer::component_layout::ComponentLayoutFixture::expectedX(coordinated,attachedFirst)-16)<.5,
+            "Native left zone ignored the measured viewport inset");
+        const auto bounds=quick.TransformToVisual(commonRoot).TransformBounds({0,0,
+            static_cast<float>(quick.ActualWidth()),static_cast<float>(quick.ActualHeight())});
+        require(bounds.X>=0 && bounds.X+bounds.Width<=900.5 && bounds.Y>=0 && bounds.Y+bounds.Height<=thickness+.5,
+            "Native move escaped resized root");
+        require(quick.Height()==48 && Media::VisualTreeHelper::GetParent(quick)==tray,
+            "Thickness change resized/reparented a system control");
+        checkLayoutIdentity();
+        const auto refused=coordinated.configure(nullptr,coordinatedRequest,{16,0,100,thickness});
+        require(FAILED(refused),
+            "Too-small native viewport was committed");
+        require(coordinated.report(refused).failurePhase==1,
+            "Successful rollback hid the rejected candidate's diagnostics");
+        require(SUCCEEDED(coordinated.report(S_OK).status) &&
+            std::abs(explorer::component_layout::ComponentLayoutFixture::expectedX(coordinated,attachedFirst)-16)<.5,
+            "Refused geometry did not restore the last confirmed native viewport");
+    }
+    geometryTurn();
+    commonRoot.Width(1000);commonRoot.Height(48);
+    commonRoot.Measure({1000,48});commonRoot.Arrange({0,0,1000,48});commonRoot.UpdateLayout();
+    require(SUCCEEDED(coordinated.configure(nullptr,coordinatedRequest)),"Native baseline did not recover after geometry fixture");
     coordinatedRequest.entries[0].zone=2;coordinatedRequest.entries[3].zone=2;
     coordinatedRequest.entries[4].zone=0;coordinatedRequest.entries[7].zone=0;
     const auto originalRender=attachedFirst.RenderTransform();Media::TranslateTransform inFlight;

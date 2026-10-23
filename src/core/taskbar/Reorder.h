@@ -26,16 +26,23 @@ inline bool same(Rectangle a, Rectangle b) noexcept {
 // Request order defines order inside each zone. Unrequested peers stay fixed.
 // App instances form one group, preserving all original internal offsets/model order.
 inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment> request,
-                 double width, double height, double gap, std::span<const Rectangle> obstacles = {}) {
+                 double width, double height, double gap, std::span<const Rectangle> obstacles = {},
+                 Rectangle viewport = {}) {
     Plan result;
     if (items.empty() || items.size() > maxReorderItems || request.empty() || request.size() > maxReorderItems ||
         obstacles.size() > maxReorderItems || !std::isfinite(width) || !std::isfinite(height) ||
         width <= 0 || height <= 0 || !std::isfinite(gap) || gap < 0 || gap > 96) return result;
+    // The native content can occupy only part of its XAML root (panel insets,
+    // clipping or a shorter monitor-local surface). Keep source coordinates in
+    // the root space; only destination zones belong to the measured viewport.
+    if (viewport.x == 0 && viewport.y == 0 && viewport.width == 0 && viewport.height == 0)
+        viewport = {0, 0, width, height};
+    if (!inside(viewport, width, height)) return result;
     for (size_t i = 0; i < items.size(); ++i) {
         if (!items[i].instance || !inside(items[i].bounds, width, height)) return result;
         for (size_t j = 0; j < i; ++j) if (items[i].instance == items[j].instance) return result;
     }
-    struct Group { Assignment assignment; double left{}, right{}; unsigned count{}; double target{}; };
+    struct Group { Assignment assignment; double left{}, right{}, top{}, bottom{}; unsigned count{}; double target{}; };
     std::vector<Group> groups;
     groups.reserve(request.size());
     result.moves.reserve(items.size());
@@ -47,8 +54,13 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
         Group group{assignment};
         for (const auto& item : items) if (item.role == assignment.role) {
             if (!item.movable) { result.status = PlanStatus::Unsupported; return result; }
-            if (!group.count) { group.left = item.bounds.x; group.right = item.bounds.x + item.bounds.width; }
-            else { group.left = std::min(group.left, item.bounds.x); group.right = std::max(group.right, item.bounds.x + item.bounds.width); }
+            if (!group.count) {
+                group.left=item.bounds.x;group.right=item.bounds.x+item.bounds.width;
+                group.top=item.bounds.y;group.bottom=item.bounds.y+item.bounds.height;
+            } else {
+                group.left=std::min(group.left,item.bounds.x);group.right=std::max(group.right,item.bounds.x+item.bounds.width);
+                group.top=std::min(group.top,item.bounds.y);group.bottom=std::max(group.bottom,item.bounds.y+item.bounds.height);
+            }
             ++group.count;
         }
         if (!group.count) { result.status = PlanStatus::Missing; return result; }
@@ -57,10 +69,11 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
         widths[zone] += group.right - group.left + (counts[zone]++ ? gap : 0);
         groups.push_back(group);
     }
-    std::array<double, 3> cursor{0, (width-widths[1])/2, width-widths[2]};
+    std::array<double, 3> cursor{viewport.x, viewport.x+(viewport.width-widths[1])/2,
+        viewport.x+viewport.width-widths[2]};
     // Pack the right zone from its physical edge. Conditional native groups
     // absent from the request remain fixed obstacles, not implicit moves.
-    double rightCursor=width;
+    double rightCursor=viewport.x+viewport.width;
     for(auto group=groups.rbegin();group!=groups.rend();++group) {
         if(group->assignment.zone!=Zone::Right)continue;
         const auto extent=group->right-group->left;
@@ -68,7 +81,7 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
         for(size_t pass=0;pass<=items.size()+obstacles.size();++pass) {
             double next=target;
             const auto avoid=[&](Rectangle obstacle) {
-                if(intersects({target,0,extent,height},obstacle))next=std::min(next,obstacle.x-gap-extent);
+                if(intersects({target,group->top,extent,group->bottom-group->top},obstacle))next=std::min(next,obstacle.x-gap-extent);
             };
             for(const auto& item:items)if(std::none_of(groups.begin(),groups.end(),[&](const auto& candidate){return candidate.assignment.role==item.role;}))avoid(item.bounds);
             for(const auto obstacle:obstacles)avoid(obstacle);
@@ -91,7 +104,8 @@ inline Plan plan(std::span<const MeasuredItem> items, std::span<const Assignment
     }
     for (size_t i = 0; i < result.moves.size(); ++i) {
         const auto& move = result.moves[i];
-        if (!inside(move.after, width, height)) { result.status = PlanStatus::Collision; result.moves.clear(); return result; }
+        auto local=move.after;local.x-=viewport.x;local.y-=viewport.y;
+        if (!inside(local, viewport.width, viewport.height)) { result.status = PlanStatus::Collision; result.moves.clear(); return result; }
         for (size_t j = 0; j < i; ++j) if (intersects(move.after, result.moves[j].after)) { result.status = PlanStatus::Collision; result.moves.clear(); return result; }
         for (const auto obstacle : obstacles) if (intersects(move.after, obstacle)) { result.status = PlanStatus::Collision; result.moves.clear(); return result; }
         for (size_t j = 0; j < items.size(); ++j) {

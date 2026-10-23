@@ -22,6 +22,38 @@ struct Adapter {
     bool accept(std::uint64_t) { return acceptAll; }
 };
 int main() {
+    // A clipped panel is not necessarily the whole visual root. Source slots
+    // outside its destination viewport still retain root-relative coordinates.
+    for (const double height : {48., 64., 96.}) {
+        const std::array measured{
+            MeasuredItem{1,Component::Start,{20,(height-32)/2,40,32},true},
+            MeasuredItem{2,Component::Applications,{400,(height-32)/2,80,32},true},
+            MeasuredItem{3,Component::Applications,{480,(height-32)/2,60,32},true},
+            MeasuredItem{4,Component::Clock,{920,(height-32)/2,40,32},true}};
+        const std::array requested{Assignment{Component::Start,Zone::Left},
+            Assignment{Component::Applications,Zone::Center},Assignment{Component::Clock,Zone::Right}};
+        const Rectangle viewport{100,0,700,height};
+        const auto result=plan(measured,requested,1000,height,8,{},viewport);
+        require(result.status==PlanStatus::Ready && result.moves.size()==4,"Inset viewport refused measured groups");
+        require(result.moves[0].after.x==100 && result.moves[1].after.x==380 &&
+            result.moves[2].after.x==460 && result.moves[3].after.x==760,
+            "Zones used root bounds instead of measured viewport");
+        for(const auto& move:result.moves)require(move.before.y==move.after.y &&
+            move.before.height==move.after.height,"Viewport changed native cross-axis alignment");
+        require(plan(measured,requested,1000,height,8,{},Rectangle{100,0,100,height}).status==PlanStatus::Collision,
+            "Too-small geometry accepted overlapping groups");
+        require(plan(measured,requested,1000,height,8,{},Rectangle{900,0,200,height}).status==PlanStatus::Invalid,
+            "Viewport beyond native root accepted");
+        const std::array obstacle{Rectangle{100,0,40,height}};
+        require(plan(measured,requested,1000,height,8,obstacle,viewport).status==PlanStatus::Collision,
+            "Viewport ignored fixed source obstacle");
+    }
+    const std::array separateRows{MeasuredItem{1,Component::Clock,{900,32,40,32},true},
+        MeasuredItem{2,Component::Unknown,{760,0,40,16},false}};
+    const std::array rightOnly{Assignment{Component::Clock,Zone::Right}};
+    const auto rowPlan=plan(separateRows,rightOnly,1000,96,8,{},Rectangle{100,0,700,96});
+    require(rowPlan.status==PlanStatus::Ready && rowPlan.moves.front().after.x==760,
+        "Right zone treated a different native row as a full-height obstacle");
     const std::vector<MeasuredItem> conditionalTray{
         {1,Component::TrayOverflow,{2308,0,32,48},true},
         {2,Component::SystemIndicators,{2340,0,32,48},false},
