@@ -1,5 +1,6 @@
 #include "TaskbarSettings.h"
 #include "core/taskbar/TrayOrder.h"
+#include "core/taskbar/ResumeBudget.h"
 #include "platform/windows/TaskbarState.h"
 #include "platform/windows/TaskbarModuleSession.h"
 #include "platform/windows/TaskbarRuntime.h"
@@ -67,6 +68,18 @@ QString monitorId(const QScreen* screen) {
     }
     return {}; // No persistent identity: do not guess another monitor's profile.
 }
+QStringList resumeOwners() {
+    QStringList result;
+    for (const auto& entry : umbrella::platform::TaskbarRuntime::monitors()) {
+        const auto monitor = entry.toMap();
+        const auto id = monitor["id"].toString();
+        const auto pid = monitor["explorerPid"].toLongLong();
+        if (id.isEmpty() || pid <= 0) return {};
+        result.append(id + ':' + QString::number(pid));
+    }
+    result.sort();
+    return result;
+}
 }
 
 TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
@@ -74,6 +87,7 @@ TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
         QString target;
         for(const auto& entry:layoutMonitors())if(entry.toMap()["device"].toString()==device)target=entry.toMap()["id"].toString();
         if(!activeComponents_.contains(target))return;
+        ++resumeEpoch_; // Loss must not let an older stability timer replenish replay.
         activeComponents_.remove(target);confirmedComponents_.remove(target);
         appearanceComponents_.remove(target);legacyTrayComponents_.remove(target);componentCatalogue_.remove(device);
         if(activeComponentMonitor_==target){activeComponentConfiguration_.clear();activeComponentMonitor_.clear();}
@@ -126,6 +140,44 @@ void TaskbarSettings::selectAppearanceMonitor(const QString& id) {
 }
 bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
     if (pending_) { QTimer::singleShot(300, this, [this, freshSession] { restoreSavedAppearance(freshSession); }); return true; }
+    QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+    const auto epoch = ++resumeEpoch_;
+    const bool appearanceRequested = settings.value("resumeAppearance", settings.contains("edge")).toBool();
+    const bool requested = appearanceRequested || settings.value("resumeComponents", appearanceRequested && !confirmedComponents_.isEmpty()).toBool();
+    if (freshSession && requested) {
+        restored_ = false;
+        bool valid = false;
+        const int previous = settings.value("recovery/unsettledAttempts", 0).toInt(&valid);
+        const int next = valid ? umbrella::taskbar::nextResumeAttempt(previous) : 0;
+        if (!next) {
+            restored_ = false;
+            status_ = QStringLiteral("Автовосстановление остановлено после двух незавершённых попыток. Сохранённые профили оставлены; примените проверенные параметры вручную.");
+            emit changed();
+            return true; // Terminal refusal: runtime must not schedule another replay.
+        }
+        settings.setValue("recovery/unsettledAttempts", next);
+        settings.sync();
+        if (settings.status() != QSettings::NoError) {
+            status_ = QStringLiteral("Не удалось записать защиту восстановления; Windows не изменена.");
+            emit changed();
+            return false;
+        }
+    }
+    const bool result = restoreSavedAppearanceImpl(freshSession);
+    if (result && restored_) {
+        const auto owners = resumeOwners();
+        // A native ack alone does not prove Explorer survived. A new generation
+        // invalidates this single-shot callback before another replay can start.
+        QTimer::singleShot(60000, this, [this, epoch, owners] {
+            if (resumeEpoch_ != epoch || !restored_ || owners.isEmpty() || resumeOwners() != owners) return;
+            QSettings stable(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+            stable.setValue("recovery/unsettledAttempts", 0);
+            stable.sync(); // Failure leaves the conservative persisted budget.
+        });
+    }
+    return result;
+}
+bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     restored_ = false;
     const bool restoreAppearance=settings.value("resumeAppearance",settings.contains("edge")).toBool();
@@ -261,6 +313,13 @@ void TaskbarSettings::apply(const QString& edge, bool detached, int transparency
     }
     if (edge != "bottom" && edge != "top" && edge != "left" && edge != "right") return;
     if (transparency < 0 || transparency > 100) return;
+    // Until placement and masks share a verified geometry contract, refuse only
+    // this monitor's incompatible appearance edit before resetting any session.
+    if (confirmedComponents_.contains(selectedAppearanceMonitor_) &&
+        (edge != "bottom" || (detached && widthPercent != 100) || thickness != 48 || islands || autoHide)) {
+        status_ = QStringLiteral("Изменение оформления отменено: сохранённый перенос этого экрана требует нижней панели 100%, 48 DIP без островков и автоскрытия. Совместное размещение и clipping новой геометрии ещё не проверены. Предыдущая конфигурация сохранена.");
+        emit changed(); return;
+    }
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     const QStringList keys{"appearanceProfilesV1", "edge", "detached", "transparency", "widthPercent", "thickness", "islands", "autoHide", "resumeAppearance", "resumeComponents", "confirmedComponentV1", "confirmedComponentsV2"};
     QVariantMap previous;

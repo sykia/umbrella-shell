@@ -74,6 +74,7 @@ try {
     if (Test-Path tests/resume_desktop_tests.cpp) {
         Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_resume_desktop_tests.exe",'tests/resume_desktop_tests.cpp') + $model + $platform + $link + $libraries)
     }
+    Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_recovery_guard_tests.exe",'tests/taskbar_recovery_guard_tests.cpp') + $model + $platform + $link + $libraries)
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_configuration_desktop_test.exe",'tests/taskbar_configuration_desktop_test.cpp') + $model + $platform + $link + $libraries + @('Qt6Test.lib','ole32.lib','oleaut32.lib','uiautomationcore.lib'))
     Write-Output "Built $destination using MSVC and Qt $(& "$qt/bin/qmake.exe" -query QT_VERSION). Deployment is a separate step."
 } finally { Pop-Location }

@@ -122,6 +122,12 @@ if(UMBRELLA_BUILD_APP)
         target_compile_options(umbrella_session_tests PRIVATE /utf-8)
         add_test(NAME taskbar_session COMMAND umbrella_session_tests)
         set_tests_properties(taskbar_session PROPERTIES TIMEOUT 15)
+        add_executable(umbrella_recovery_guard_tests
+            tests/taskbar_recovery_guard_tests.cpp src/app/TaskbarSettings.cpp src/app/TaskbarSettings.h)
+        target_link_libraries(umbrella_recovery_guard_tests PRIVATE Qt6::Gui umbrella_platform umbrella_presentation)
+        target_compile_definitions(umbrella_recovery_guard_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_compile_options(umbrella_recovery_guard_tests PRIVATE /utf-8)
+        add_test(NAME taskbar_recovery_guard COMMAND umbrella_recovery_guard_tests)
         add_executable(umbrella_resume_desktop_tests EXCLUDE_FROM_ALL
             tests/resume_desktop_tests.cpp src/app/TaskbarSettings.cpp src/app/TaskbarSettings.h)
         target_link_libraries(umbrella_resume_desktop_tests PRIVATE Qt6::Test umbrella_platform umbrella_presentation)

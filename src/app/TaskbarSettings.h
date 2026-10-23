@@ -63,6 +63,8 @@ public:
 signals:
     void changed();
 private:
+    bool restoreSavedAppearanceImpl(bool freshSession);
+    quint64 resumeEpoch_ = 0;
     bool applyNativeComponents(const QString& monitor,const QVariantMap& configuration);
     bool resetNativeComponents(const QString& monitor);
     bool persistConfirmedComponents();

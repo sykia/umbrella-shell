@@ -1,4 +1,5 @@
 #include "core/taskbar/Placement.h"
+#include "core/taskbar/ResumeBudget.h"
 #include "core/taskbar/TrayOrder.h"
 #include "core/taskbar/ComponentRegistry.h"
 #include <array>
@@ -10,6 +11,11 @@ void require(bool ok, const char* message) {
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
 int main() {
+    require(nextResumeAttempt(0)==1 && nextResumeAttempt(1)==2, "resume attempts unavailable");
+    require(nextResumeAttempt(2)==0 && nextResumeAttempt(3)==0,
+        "restarted owner may replay indefinitely");
+    require(nextResumeAttempt(-1)==0 && nextResumeAttempt(std::numeric_limits<int>::max())==0,
+        "corrupt resume budget grants native apply");
     for(unsigned code=0;code<24;++code) {
         const auto order=trayOrder(code);
         require(order && trayOrderCode(*order)==code,"tray permutation does not round-trip");
