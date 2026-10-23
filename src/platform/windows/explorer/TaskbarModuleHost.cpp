@@ -15,7 +15,7 @@
 
 namespace {
 using namespace umbrella::explorer;
-struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; bool readOnly = false; };
+struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; bool readOnly = false; unsigned placementSerial{}; };
 std::vector<Attachment> attachments;
 HWND owner{};
 HMODULE module{};
@@ -37,6 +37,7 @@ std::mutex placementMutex;
 PlacementCommand pendingPlacement;
 ComponentLayoutReport placementReply;
 bool placementReceived=false;
+unsigned placementSerial=0;
 bool fixtureNativeTouched = false;
 LRESULT CALLBACK observerFixtureProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp) {
     if (message==WM_COPYDATA || message==RegisterWindowMessageW(attachMessage) || message==RegisterWindowMessageW(restoreMessage)) fixtureNativeTouched=true;
@@ -121,6 +122,17 @@ void restore() {
     attachments.clear();
 }
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if(message==placementLostMessage) {
+        for(const auto& attachment:attachments)if(attachment.window==reinterpret_cast<HWND>(lp) && attachment.placementSerial==wp) {
+            MONITORINFOEXW info{};info.cbSize=sizeof(info);char device[64]{};
+            if(GetMonitorInfoW(MonitorFromWindow(attachment.window,MONITOR_DEFAULTTONULL),&info) &&
+                WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,device,64,nullptr,nullptr)) {
+                std::printf("slots-lost %s %u\n",device,attachment.placementSerial);std::fflush(stdout);
+            }
+            break;
+        }
+        return 0;
+    }
     if(message==WM_COPYDATA && nativeEditTarget && reinterpret_cast<HWND>(wp)==nativeEditTarget) {
         const auto* packet=reinterpret_cast<const COPYDATASTRUCT*>(lp);
         if(packet && packet->dwData==placementReportProtocol) {
@@ -133,17 +145,19 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
     if(message==placementMessage) {
         PlacementCommand command;
         {const std::lock_guard lock(placementMutex);command=pendingPlacement;}
-        for(const auto& attachment:attachments) {
+        for(auto& attachment:attachments) {
             MONITORINFOEXW info{};info.cbSize=sizeof(info);char device[64]{};
             if(!GetMonitorInfoW(MonitorFromWindow(attachment.window,MONITOR_DEFAULTTONULL),&info))continue;
             WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,device,64,nullptr,nullptr);
             if(std::strcmp(device,command.device))continue;
+            if(!command.statusOnly){command.request.serial=++placementSerial;attachment.placementSerial=placementSerial;}
             nativeEditTarget=attachment.window;placementReceived=false;placementReply={};
             COPYDATASTRUCT packet{command.statusOnly?placementStatusProtocol:placementProtocol,sizeof(command.request),&command.request};DWORD_PTR accepted{};
             const bool transport=SendMessageTimeoutW(attachment.window,WM_COPYDATA,reinterpret_cast<WPARAM>(owner),reinterpret_cast<LPARAM>(&packet),SMTO_ABORTIFHUNG,3000,&accepted) && accepted && placementReceived;
             nativeEditTarget=nullptr;
             std::printf("slots-report %s status=%08lx bound=%u items=%u passes=%u phase=%u item=%u\n",device,static_cast<unsigned long>(placementReply.status),placementReply.bound,placementReply.items,placementReply.passes,placementReply.failurePhase,placementReply.failureItem);
             const bool ok=transport && (command.statusOnly || SUCCEEDED(placementReply.status));
+            if(ok && !command.statusOnly)std::printf("slots-applied %s %u\n",device,command.request.count?command.request.serial:0);
             std::printf(ok?(command.statusOnly?"slots-status %s\n":"slots-ok %s\n"):"slots-refused %s\n",device);std::fflush(stdout);return ok;
         }
         std::printf("slots-refused %s\n",command.device);std::fflush(stdout);return FALSE;
@@ -348,7 +362,8 @@ int wmain(int argc, wchar_t** argv) {
     }
     inspectFixture=argc==2 && !wcscmp(argv[1],L"--fixture-inspect-components");
     const bool placementFixture=argc==2 && !wcscmp(argv[1],L"--fixture-placement");
-    placementSession=placementFixture || (argc==2 && !wcscmp(argv[1],L"--placement-session"));
+    const bool componentService=argc==2 && !wcscmp(argv[1],L"--components");
+    placementSession=componentService || placementFixture || (argc==2 && !wcscmp(argv[1],L"--placement-session"));
     const bool fixture = inspectFixture || placementFixture || (argc == 2 && !wcscmp(argv[1], L"--fixture"));
     const bool serve = argc == 2 && !wcscmp(argv[1], L"--serve");
     const bool inspect = argc == 2 && !wcscmp(argv[1], L"--inspect-taskview");
@@ -503,7 +518,7 @@ int wmain(int argc, wchar_t** argv) {
             }
             PostMessageW(owner,WM_CLOSE,0,0);return 0;
         },nullptr,0,nullptr);
-        if(!inputThread || !SetTimer(owner,1,60000,nullptr)){failed=true;PostMessageW(owner,WM_CLOSE,0,0);}
+        if(!inputThread || (!componentService && !SetTimer(owner,1,60000,nullptr))){failed=true;PostMessageW(owner,WM_CLOSE,0,0);}
         else {std::puts("slots-ready");std::fflush(stdout);}
     } else if (editExperiment && !failed) {
         const bool ok = SendMessageW(owner, editMessage, static_cast<WPARAM>(inspect || configureTaskview || verifyPlacement ? EditAction::Inspect : EditAction::Begin), 0) != 0;
@@ -571,8 +586,14 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& value : attachments) windows.push_back(value.window);
         if (!islands::start(owner, windows)) { restore(); return 5; }
         inputThread = CreateThread(nullptr, 0, [](void*) -> DWORD {
-            char line[192]{};
+            char line[1024]{};
             while (std::fgets(line, sizeof(line), stdin)) {
+                if(!std::strncmp(line,"slots",5)) {
+                    PlacementCommand command;
+                    if(!parsePlacementCommand(line,command)){std::puts("slots-refused invalid-request");std::fflush(stdout);continue;}
+                    {const std::lock_guard lock(placementMutex);pendingPlacement=command;}
+                    SendMessageW(owner,placementMessage,0,0);continue;
+                }
                 unsigned width{}, edge{}, thickness = 48, mode = 0, detached = 0; char extra{};
                 MonitorRequest request;
                 if((sscanf_s(line,"tray-order %u %63s %c",&width,request.device,64u,&extra,1u)==2 && width<24) ||

@@ -1,6 +1,7 @@
 #pragma once
 #include <QString>
 #include <memory>
+#include <functional>
 
 namespace umbrella::platform {
 class TaskbarAppearance final {
@@ -14,6 +15,8 @@ public:
     bool restore(QString& error);
     bool nativeSessionActive() const;
     bool reorderTray(const QString& device,unsigned order,QString& error);
+    bool placeComponents(const QByteArray& command,const QString& device,QString& error);
+    void setComponentLossHandler(std::function<void(const QString&)> handler);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

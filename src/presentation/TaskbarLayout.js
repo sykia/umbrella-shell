@@ -35,23 +35,20 @@ function component(id) { return catalog.filter(function(c) { return c.id === id 
 function movementBlocker(id, primary, available) {
     if (!available) return "Нужны совместимые системные DLL и native-host рядом с приложением."
     if (!primary) return "Native-перенос на дополнительной панели ещё не проверен."
-    if (id === "apps" || id === "appoverflow") return "Нужен адаптер динамической модели приложений: Translation не меняет порядок и Win+номер."
-    if (id === "widgets" || id === "start" || id === "search") return "Нужен адаптер раскладки ItemsRepeater и проверка системных flyout и клавиатурного порядка."
-    if (id !== "taskview") return "Нужен проверенный адаптер контейнера SystemTray и его hit-test/flyout."
+    if (id === "desktop") return "Показать рабочий стол сохраняет крайний правый слот."
+    if (!movable(id)) return "Для этого вложенного или условного компонента адаптер пока не подтверждён."
     return ""
 }
 function dragIds(id) { return id === "network" || id === "volume" ? ["network","volume"] : [id] }
+function movable(id) { return ["widgets","start","search","taskview","apps","overflow","input","network","volume","clock"].indexOf(id)>=0 }
 function remaining(items,id) { var group=dragIds(id); return items.filter(v => group.indexOf(v)<0) }
 function nativeConfiguration(value) {
     if (!valid(value)) return false
-    var base=defaults(true), left=move(base,"taskview","left",1)
-    var same=(a,b) => JSON.stringify(a)===JSON.stringify(b)
-    var taskview=(same(value.left,base.left) && same(value.center,base.center)) || (same(value.left,left.left) && same(value.center,left.center))
-    // Four original groups can occupy any of the four right-side slots.
-    // Network/volume remain adjacent; Show Desktop retains its edge semantics.
-    var tray=value.right.length===6 && value.right[5]==="desktop" && value.right.indexOf("volume")===value.right.indexOf("network")+1 &&
-        ["overflow","input","network","volume","clock"].every(id => value.right.slice(0,5).indexOf(id)>=0)
-    return taskview && tray && same(value.available,base.available)
+    if (JSON.stringify(value.available)!==JSON.stringify(defaults(true).available) || value.right[value.right.length-1]!=="desktop") return false
+    return ["left","center","right"].every(function(zone) {
+        var list=value[zone], network=list.indexOf("network"), volume=list.indexOf("volume")
+        return (network<0 && volume<0) || (network>=0 && volume===network+1)
+    })
 }
 function defaults(primary) {
     var result = {version:1, available:[], left:[], center:[], right:[], gap:8}

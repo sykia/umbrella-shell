@@ -17,6 +17,7 @@
 #include <algorithm>
 
 namespace {
+bool legacyComponentConfiguration(const QVariantMap& configuration);
 bool setResumeAtLogin(bool enabled) {
     return umbrella::platform::TaskbarRuntime::setLoginResume(enabled);
 }
@@ -49,6 +50,17 @@ QString monitorId(const QScreen* screen) {
 }
 
 TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
+    const auto componentLost=[this](const QString& device) {
+        bool target=false;
+        for(const auto& entry:layoutMonitors())if(entry.toMap()["id"].toString()==activeComponentMonitor_ && entry.toMap()["device"].toString()==device)target=true;
+        if(!target)return;
+        activeComponentConfiguration_.clear();activeComponentMonitor_.clear();
+        placementInAppearance_=false;
+        QSettings settings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+        settings.remove("confirmedComponentV1");settings.sync();
+        status_=QStringLiteral("Explorer восстановил штатные позиции после изменения раскладки. Повторное применение отключено.");emit changed();
+    };
+    componentSession_.componentLost=componentLost;appearance_.setComponentLossHandler(componentLost);
     connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] { emit changed(); });
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this] { emit changed(); });
     connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this] { emit changed(); });
@@ -103,7 +115,7 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
     QString error;
     if (freshSession && !appearance_.restore(error)) { status_ = error; emit changed(); return false; }
     const auto confirmed = settings.value("confirmedComponentV1").toMap();
-    if (!confirmed.isEmpty() && confirmed["configuration"].toMap()["left"].toStringList().contains("taskview")) {
+    if (!confirmed.isEmpty() && legacyComponentConfiguration(confirmed["configuration"].toMap()) && confirmed["configuration"].toMap()["left"].toStringList().contains("taskview")) {
         if (!componentSession_.stop(error)) { status_ = error; emit changed(); return false; }
         const bool applied = applyComponentConfiguration(confirmed["monitor"].toString(), confirmed["configuration"].toMap());
         if (!applied) {
@@ -290,10 +302,10 @@ QVariantList TaskbarSettings::layoutMonitors() const {
 }
 
 bool TaskbarSettings::resetComponentLayout() {
-    QString error; const bool ok = trayInAppearance_ ? appearance_.reorderTray(trayDevice_,false,error) : componentSession_.stop(error);
+    QString error; const bool ok = placementInAppearance_ ? appearance_.placeComponents("slots "+trayDevice_.toLatin1()+" reset\n",trayDevice_,error) : trayInAppearance_ ? appearance_.reorderTray(trayDevice_,false,error) : componentSession_.stop(error);
     status_ = ok ? QStringLiteral("Исходные позиции Task View и групп трея восстановлены.") : error;
     if (ok) {
-        trayInAppearance_=false;trayDevice_.clear();
+        trayInAppearance_=false;placementInAppearance_=false;trayDevice_.clear();
         activeComponentConfiguration_.clear(); activeComponentMonitor_.clear();
         QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
         settings.remove("confirmedComponentV1"); settings.sync();
@@ -381,7 +393,7 @@ std::optional<unsigned> componentTrayOrder(const QJsonArray& right) {
     }
     return count==4 ? umbrella::taskbar::trayOrderCode(order) : std::nullopt;
 }
-bool supportedComponentConfiguration(const QVariantMap& configuration) {
+bool legacyComponentConfiguration(const QVariantMap& configuration) {
     if (!validDraft(configuration)) return false;
     const auto value = QJsonObject::fromVariantMap(configuration);
     const auto expected = QJsonDocument::fromJson(R"({
@@ -395,6 +407,23 @@ bool supportedComponentConfiguration(const QVariantMap& configuration) {
     const bool taskViewDefault=value.value("left")==QJsonArray{"widgets"} && value.value("center")==QJsonArray{"start","search","taskview","apps"};
     return (taskViewLeft || taskViewDefault) && componentTrayOrder(value.value("right").toArray()).has_value();
 }
+bool supportedComponentConfiguration(const QVariantMap& configuration) {
+    if(!validDraft(configuration))return false;
+    const auto value=QJsonObject::fromVariantMap(configuration);
+    const auto unavailable=QJsonDocument::fromJson(R"(["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"])").array();
+    if(value["available"]!=unavailable)return false;
+    QSet<QString> ids;
+    for(const auto zone:{"left","center","right"}) {
+        const auto entries=value[zone].toArray();
+        for(qsizetype i=0;i<entries.size();++i) {
+            const auto id=entries[i].toString();ids.insert(id);
+            if(id=="network" && (i+1>=entries.size() || entries[i+1]!=QStringLiteral("volume")))return false;
+            if(id=="volume" && (!i || entries[i-1]!=QStringLiteral("network")))return false;
+            if(id=="desktop" && (strcmp(zone,"right") || i!=entries.size()-1))return false;
+        }
+    }
+    return ids==QSet<QString>{"widgets","start","search","taskview","apps","overflow","input","network","volume","clock","desktop"};
+}
 }
 bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration) {
     if (!supportedComponentConfiguration(configuration)) return false;
@@ -405,6 +434,27 @@ bool TaskbarSettings::applyComponentConfiguration(const QString& monitor, const 
         for(const auto& entry:layoutMonitors())if(entry.toMap()["id"].toString()==target){primary=entry.toMap()["primary"].toBool();device=entry.toMap()["device"].toString();}
         if(pending_ || !primary){status_=QStringLiteral("Эта перестановка поддерживается только на основной панели.");return false;}
         QString error;
+        if(!legacyComponentConfiguration(value)) {
+            QByteArray command="slots "+device.toLatin1()+' '+QByteArray::number(value["gap"].toInt());
+            int zoneIndex=0;
+            for(const auto zone:{"left","center","right"}) {
+                for(const auto& entry:value[zone].toList()) {
+                    auto id=entry.toString();if(id=="volume")continue;if(id=="network")id="quicksettings";
+                    command+=' '+id.toLatin1()+':'+QByteArray::number(zoneIndex);
+                }
+                ++zoneIndex;
+            }
+            command+='\n';
+            bool ok=false;
+            if(appearance_.nativeSessionActive()) {
+                if(!componentSession_.stop(error)){status_=error;return false;}
+                ok=appearance_.placeComponents(command,device,error);
+                if(ok){placementInAppearance_=true;trayInAppearance_=false;trayDevice_=device;}
+            } else ok=componentSession_.placeComponents(command,device,error);
+            if(!ok)status_=error;
+            return ok;
+        }
+        placementInAppearance_=false;
         const bool left=value["left"].toStringList().contains("taskview");
         const auto trayOrder=componentTrayOrder(QJsonArray::fromVariantList(value["right"].toList()));
         if(!trayOrder)return false;

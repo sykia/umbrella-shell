@@ -5,6 +5,7 @@
 #include "TaskbarPlacementProtocol.h"
 #include "core/taskbar/Reorder.h"
 #include "TaskbarSourceCapabilities.h"
+#include <shellapi.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <memory>
@@ -25,6 +26,9 @@ class Session {
     };
     struct Control {
         bool active=true,writing=false;
+        HWND notificationOwner{},notificationTarget{};
+        unsigned notificationSerial{};
+        HWND panel{};
         FrameworkElement root{nullptr},repeater{nullptr};Controls::StackPanel tray{nullptr};
         Value layout{nullptr},source{nullptr};
         int repeaterChildren=-1,trayChildren=-1;
@@ -129,6 +133,10 @@ class Session {
     }
     static void fail(Control& c,HRESULT status) noexcept {
         c.status=status;c.active=false;c.confirmed.clear();
+        if(c.notificationOwner) {
+            PostMessageW(c.notificationOwner,placementLostMessage,c.notificationSerial,reinterpret_cast<LPARAM>(c.notificationTarget));
+            c.notificationOwner=nullptr;
+        }
         try {
             Value layout{nullptr},source{nullptr};
             winrt::check_hresult(repeater::layout(c.repeater,layout));
@@ -181,6 +189,7 @@ class Session {
                 }
                 if(stable)return;
             }
+            if(c.panel && !standardPanel(c.panel))winrt::throw_hresult(E_ABORT);
             c.writing=true;
             struct Finish {bool& flag;~Finish(){flag=false;}} finish{c.writing};
             c.bindings.clear();collect(c,c.repeater);collect(c,c.tray);
@@ -218,9 +227,16 @@ class Session {
             c.confirmed=plan.moves;c.appliedGeneration=c.generation;c.status=S_OK;++c.passes;
         }catch(...){fail(c,winrt::to_hresult());}
     }
+    static bool standardPanel(HWND hwnd) noexcept {
+        RECT rect{};MONITORINFO info{sizeof(info)};APPBARDATA bar{};bar.cbSize=sizeof(bar);bar.hWnd=hwnd;
+        return GetDpiForWindow(hwnd)==96 && GetWindowRect(hwnd,&rect) &&
+            GetMonitorInfoW(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONULL),&info) &&
+            rect.left==info.rcMonitor.left && rect.right==info.rcMonitor.right && rect.bottom==info.rcMonitor.bottom && rect.bottom-rect.top==48 &&
+            !(SHAppBarMessage(ABM_GETSTATE,&bar)&ABS_AUTOHIDE);
+    }
     bool bind(HWND hwnd) {
         wchar_t windowClass[64]{};
-        if(!GetClassNameW(hwnd,windowClass,64) || (wcscmp(windowClass,L"Shell_TrayWnd") && wcscmp(windowClass,L"Shell_SecondaryTrayWnd")))return false;
+        if(!GetClassNameW(hwnd,windowClass,64) || (wcscmp(windowClass,L"Shell_TrayWnd") && wcscmp(windowClass,L"Shell_SecondaryTrayWnd")) || !standardPanel(hwnd))return false;
         constexpr GUID ids[]{
             {0xdab69a79,0xfee0,0x33f0,{0xd8,0x1e,0x02,0x3f,0xbf,0x17,0x2b,0x51}},
             {0x24534974,0xe00e,0x46a5,{0x8f,0x69,0xf6,0x0d,0x0c,0xeb,0x9b,0xd9}},
@@ -229,7 +245,7 @@ class Session {
         for(unsigned i=0;i<3;++i)if(!native_layout::matches(GetModuleHandleW(names[i]),ids[i]))return false;
         const auto frame=context_menu::taskbarElement(hwnd);
         if(!frame || !frame.XamlRoot())return false;
-        auto c=std::make_shared<Control>();c->root=frame.XamlRoot().Content().try_as<FrameworkElement>();
+        auto c=std::make_shared<Control>();c->panel=hwnd;c->root=frame.XamlRoot().Content().try_as<FrameworkElement>();
         if(!c->root || !c->root.Dispatcher().HasThreadAccess())return false;
         std::vector<DependencyObject> pending{c->root};unsigned visited=0;
         while(!pending.empty()) {
@@ -271,6 +287,9 @@ class Session {
 public:
     Session()=default;Session(const Session&)=delete;Session& operator=(const Session&)=delete;
     ~Session(){reset();}
+    void notifyFailure(HWND owner,HWND target,unsigned serial) noexcept {
+        if(control_ && control_->active){control_->notificationOwner=owner;control_->notificationTarget=target;control_->notificationSerial=serial;}
+    }
     HRESULT configure(HWND hwnd,const ComponentLayoutRequest& request) noexcept {
         if(!validComponentLayout(request))return E_INVALIDARG;
         if(!request.count)return reset()?S_OK:E_ABORT;

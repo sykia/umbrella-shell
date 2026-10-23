@@ -7,10 +7,11 @@
 // Versioned placement request. Legacy experimental layout-replacement messages are never accepted.
 namespace umbrella::explorer {
 inline constexpr ULONG_PTR placementProtocol=protocol+8,placementReportProtocol=protocol+9,placementStatusProtocol=protocol+10;
+inline constexpr UINT placementLostMessage=WM_APP+24;
 inline constexpr unsigned maxLayoutGroups=32;
 struct ComponentLayoutAssignment {wchar_t id[24]{};std::uint32_t zone{};};
 struct ComponentLayoutRequest {
-    std::uint32_t size=sizeof(ComponentLayoutRequest),version=1,count{},gap=8,flags{};
+    std::uint32_t size=sizeof(ComponentLayoutRequest),version=1,count{},gap=8,flags{},serial{};
     ComponentLayoutAssignment entries[maxLayoutGroups]{};
 };
 // Empty request means restore the original layout, never hide all controls.

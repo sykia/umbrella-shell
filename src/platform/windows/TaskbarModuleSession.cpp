@@ -1,8 +1,10 @@
 #include "TaskbarModuleSession.h"
 #include "explorer/NativeTaskbarLayout.h"
+#include "explorer/TaskbarPlacementCommand.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFileInfo>
+#include <QDebug>
 #include <Windows.h>
 
 namespace umbrella::platform {
@@ -13,15 +15,51 @@ bool TaskbarModuleSession::available() {
     return QFileInfo::exists(hostPath()) && QFileInfo::exists(QCoreApplication::applicationDirPath() + "/UmbrellaTaskbarModule.dll");
 }
 bool TaskbarModuleSession::layoutAvailable() { return available() && explorer::native_layout::installedBuildSupported(); }
+TaskbarModuleSession::TaskbarModuleSession() {
+    QObject::connect(&host_,&QProcess::started,&host_,[this]{++processEpoch_;placements_.clear();});
+    QObject::connect(&host_,&QProcess::readyReadStandardOutput,&host_,[this]{readOutput();});
+    QObject::connect(&host_,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),&host_,[this](int,QProcess::ExitStatus){
+        if(!stopping_)for(auto i=placements_.cbegin();i!=placements_.cend();++i)deferLoss(i.key(),i.value());
+    });
+}
+void TaskbarModuleSession::deferLoss(const QString& device,unsigned serial) {
+    const auto epoch=processEpoch_;
+    QMetaObject::invokeMethod(&host_,[this,device,serial,epoch]{
+        if(epoch!=processEpoch_ || placements_.value(device)!=serial)return;
+        placements_.remove(device);
+        if(componentLost)componentLost(device);
+    },Qt::QueuedConnection);
+}
+void TaskbarModuleSession::readOutput() {
+    while(host_.canReadLine()) {
+        const auto line=host_.readLine(1024).trimmed();
+        const auto fields=line.split(' ');
+        if(fields.size()==3 && (fields[0]=="slots-lost" || fields[0]=="slots-applied")) {
+            bool valid=false;const auto serial=fields[2].toUInt(&valid);
+            if(!valid)continue;
+            const auto device=QString::fromLatin1(fields[1]);
+            if(fields[0]=="slots-lost"){if(serial)deferLoss(device,serial);}
+            else if(serial)placements_.insert(device,serial);
+            else placements_.remove(device);
+            continue;
+        }
+        if(replies_.size()>=64)replies_.dequeue();
+        replies_.enqueue(line);
+    }
+}
 TaskbarModuleSession::~TaskbarModuleSession() { QString ignored; stop(ignored); }
 bool TaskbarModuleSession::waitForLine(const QByteArray& expected) {
+    QByteArray placementDiagnostic;
     QElapsedTimer elapsed;
     elapsed.start();
     while (elapsed.elapsed() < 3000) {
-        while (host_.canReadLine()) {
-            const auto line = host_.readLine(512).trimmed();
+        readOutput();
+        while (!replies_.isEmpty()) {
+            const auto line = replies_.dequeue();
+            if(line.startsWith("slots-report "))placementDiagnostic=line;
+            if(line.startsWith("slots-refused ") && !placementDiagnostic.isEmpty())qWarning().noquote()<<placementDiagnostic;
             if (line == expected) return true;
-            if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused" || line.startsWith("tray-refused ")) return false;
+            if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused" || line.startsWith("tray-refused ") || line.startsWith("slots-refused ")) return false;
         }
         if (!host_.waitForReadyRead(static_cast<int>(3000 - elapsed.elapsed()))) return false;
     }
@@ -79,14 +117,18 @@ bool TaskbarModuleSession::positionTaskView(int x, QString& error, bool afterWid
 }
 bool TaskbarModuleSession::stop(QString& error) {
     if (host_.state() == QProcess::NotRunning) return true;
+    stopping_=true;
     host_.closeWriteChannel(); // EOF restores the subclass and original rectangle, then exits.
     if (!host_.waitForFinished(4000) || host_.exitStatus() != QProcess::NormalExit || host_.exitCode() != 0) {
+        stopping_=false;
         error = QStringLiteral("Модуль панели ещё не подтвердил восстановление."); return false;
     }
+    placements_.clear();replies_.clear();stopping_=false;
     return true;
 }
 bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,unsigned trayOrder,QString& error) {
     if(gap<0 || gap>96 || trayOrder>=24 || !layoutAvailable()){error=QStringLiteral("Нативное размещение компонентов несовместимо с этой сборкой Windows.");return false;}
+    if(running() && host_.arguments().contains("--components") && !stop(error))return false;
     if(host_.state()==QProcess::NotRunning) {
         host_.setProgram(hostPath());host_.setArguments({"--configure-taskview"});
         host_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
@@ -116,6 +158,26 @@ bool TaskbarModuleSession::reorderTray(const QString& device,unsigned order,QStr
     const auto command=QByteArray("tray-order ")+QByteArray::number(order)+' '+device.toLatin1()+'\n';
     if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("tray-ok "+device.toLatin1())) {
         error=QStringLiteral("Windows не подтвердила порядок трея. Оформление не отключалось.");return false;
+    }
+    return true;
+}
+bool TaskbarModuleSession::placeComponents(const QByteArray& command,const QString& device,QString& error) {
+    explorer::PlacementCommand parsed;
+    if(!explorer::parsePlacementCommand(std::string_view(command.constData(),static_cast<size_t>(command.size())),parsed) ||
+        parsed.statusOnly || QString::fromLatin1(parsed.device)!=device || !layoutAvailable()) {
+        error=QStringLiteral("Нативное размещение компонентов несовместимо с запросом или сборкой Windows.");return false;
+    }
+    if(running() && host_.arguments().contains("--configure-taskview") && !stop(error))return false;
+    if(!running()) {
+        replies_.clear();host_.setProgram(hostPath());host_.setArguments({"--components"});
+        host_.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
+        host_.start();
+        if(!host_.waitForStarted(3000) || !waitForLine("slots-ready")) {
+            QString ignored;stop(ignored);error=QStringLiteral("Не удалось подключить сессию компонентов Explorer.");return false;
+        }
+    }
+    if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("slots-ok "+device.toLatin1())) {
+        error=QStringLiteral("Windows отказала в переносе. Новый порядок не сохранён.");return false;
     }
     return true;
 }

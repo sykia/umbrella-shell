@@ -64,6 +64,7 @@ private:
     QVariantMap activeComponentConfiguration_;
     QString activeComponentMonitor_;
     bool trayInAppearance_=false;
+    bool placementInAppearance_=false;
     QString trayDevice_;
     bool available_ = false, autoHide_ = false, pending_ = false;
     QString status_;

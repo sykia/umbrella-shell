@@ -1,10 +1,14 @@
 #pragma once
 #include <QProcess>
 #include <QString>
+#include <QHash>
+#include <QQueue>
+#include <functional>
 
 namespace umbrella::platform {
 class TaskbarModuleSession final {
 public:
+    TaskbarModuleSession();
     ~TaskbarModuleSession();
     static bool available();
     static bool layoutAvailable();
@@ -15,9 +19,17 @@ public:
     bool configureComponents(bool taskViewLeft,int gap,unsigned trayOrder,QString& error);
     bool running() const {return host_.state()!=QProcess::NotRunning;}
     bool reorderTray(const QString& device,unsigned order,QString& error);
+    bool placeComponents(const QByteArray& command,const QString& device,QString& error);
+    std::function<void(const QString&)> componentLost;
 private:
     friend struct TaskbarModuleSessionTest;
     bool waitForLine(const QByteArray& expected);
+    void readOutput();
+    void deferLoss(const QString& device,unsigned serial);
     QProcess host_;
+    QQueue<QByteArray> replies_;
+    QHash<QString,unsigned> placements_;
+    bool stopping_=false;
+    unsigned processEpoch_=0;
 };
 }

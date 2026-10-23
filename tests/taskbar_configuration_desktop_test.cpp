@@ -41,7 +41,8 @@ int main(int argc, char** argv) {
         struct RegistryExit {HKEY key;~RegistryExit(){RegOverridePredefKey(HKEY_CURRENT_USER,nullptr);RegCloseKey(key);}} registryExit{registry};
         return umbrella::platform::watchTaskbarAppearance(watcher.arguments()[2].toULong(),watcher.arguments()[3],watcher.arguments()[4]);
     }
-    const bool quietTray=argc==2 && !std::strcmp(argv[1],"--tray-only");
+    const bool quietPlacement=argc==2 && !std::strcmp(argv[1],"--placement-only");
+    const bool quietTray=quietPlacement || (argc==2 && !std::strcmp(argv[1],"--tray-only"));
     if (!quietTray && ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000)) return 2;
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) { std::fprintf(stderr, "%s\n", message.toUtf8().constData()); });
     QGuiApplication app(argc,argv);
@@ -92,7 +93,7 @@ int main(int argc, char** argv) {
         }
     } registrySandbox;
     if (!registrySandbox.active) return 4;
-    if(app.arguments()[1]=="--tray-only") {
+    if(quietTray) {
         // Quiet end-to-end mode: no view, SendInput, SetFocus or flyout invocation.
         // Both preferences and Run-key writes remain inside the sandboxes above.
         const auto snapshot=[&]() {
@@ -111,11 +112,17 @@ int main(int argc, char** argv) {
         };
         const auto foreground=GetForegroundWindow();
         const auto original=snapshot();if(original.isEmpty())return 11;
-        const auto configuration=QJsonDocument::fromJson(R"({"version":1,"gap":8,
+        auto configuration=QJsonDocument::fromJson(R"({"version":1,"gap":8,
             "left":["widgets"],"center":["start","search","taskview","apps"],
             "right":["clock","network","volume","input","overflow","desktop"],
             "available":["trayapps","appoverflow","power","pen","keyboard","touchpad","emoji","studio","microphone","callmute","privacy","notifications","eject","vpn","chat","copilot","systemtray","remote"]})").object().toVariantMap();
         QString monitor;
+        if(quietPlacement) {
+            configuration["left"]=QStringList{"widgets","start","clock"};
+            configuration["center"]=QStringList{"search","taskview","apps"};
+            configuration["right"]=QStringList{"network","volume","input","overflow","desktop"};
+            configuration=QJsonObject::fromVariantMap(configuration).toVariantMap();
+        }
         {
             TaskbarSettings model;
             for(const auto& item:model.layoutMonitors())if(item.toMap()["primary"].toBool())monitor=item.toMap()["id"].toString();
@@ -125,7 +132,7 @@ int main(int argc, char** argv) {
             QSettings profile(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
             if(!profile.contains("appearanceProfilesV1")){std::fprintf(stderr,"Appearance setup: %s\n",model.status().toUtf8().constData());return 19;}
             QElapsedTimer elapsed;elapsed.start();
-            for(unsigned code=0;code<24;++code) {
+            for(unsigned code=0;code<(quietPlacement?0u:24u);++code) {
                 const auto order=*umbrella::taskbar::trayOrder(code);
                 QStringList right;
                 const std::array<QStringList,4> ids{QStringList{"overflow"},QStringList{"input"},QStringList{"network","volume"},QStringList{"clock"}};
@@ -145,12 +152,14 @@ int main(int argc, char** argv) {
                     last=x;
                 }
             }
-            std::printf("All 24 original tray group orders verified through native slots and sandboxed persistence in %lld ms (includes diagnostic IPC).\n",elapsed.elapsed());
+            if(!quietPlacement)std::printf("All 24 original tray group orders verified through native slots and sandboxed persistence in %lld ms (includes diagnostic IPC).\n",elapsed.elapsed());
             if(!model.applyComponentConfiguration(monitor,configuration)){std::fprintf(stderr,"Tray apply: %s\n",model.status().toUtf8().constData());return 12;}
+            if(quietPlacement)QTest::qWait(250); // Observe any late native rejection before checking persistence.
             if(model.activeComponentConfiguration()!=configuration || model.componentDraft(monitor)!=configuration || snapshot()==original)return 13;
             auto invalid=configuration;invalid["right"]=QStringList{"overflow","input","network","clock","volume","desktop"};
             if(model.applyComponentConfiguration(monitor,invalid) || model.componentDraft(monitor)!=configuration)return 14;
         }
+        if(quietPlacement)QTest::qWait(250); // A real restart follows owner teardown and native closing animations.
         if(snapshot()!=original)return 15;
         {
             TaskbarSettings restarted;
@@ -161,7 +170,7 @@ int main(int argc, char** argv) {
         if(state.contains("confirmedComponentV1") || state.value("resumeAppearance",true).toBool() || GetForegroundWindow()!=foreground){
             std::printf("Tray reset diagnostics: confirmed=%u resume=%u foreground=%u\n",state.contains("confirmedComponentV1"),state.value("resumeAppearance",true).toBool(),GetForegroundWindow()==foreground);return 18;
         }
-        std::puts("Passed: 24 real tray orders through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
+        std::puts("Passed: real component placement through TaskbarSettings, sandboxed save/reload/restart replay, split-group refusal, reset and owner shutdown; no view/input/flyout or actual Run-key changes.");
         return 0;
     }
     QVariantMap confirmedForRestart;

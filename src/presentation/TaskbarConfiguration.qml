@@ -57,7 +57,7 @@ Rectangle {
     function commit(next) {
         next = LayoutModel.clone(next)
         if (!canSubmit || !supported(next) || !monitor || applying) {
-            feedback = "Доступны Task View после Виджетов и перестановка штатных групп внутри правой области."
+            feedback = "Переносите компоненты между тремя областями. Показать рабочий стол остаётся справа."
             return false
         }
         queuedConfiguration = next
@@ -67,7 +67,7 @@ Rectangle {
         return true
     }
     function moveComponent(id, zone, index) {
-        if (["taskview","overflow","input","clock","network","volume"].indexOf(id)<0) return false
+        if (!LayoutModel.movable(id)) return false
         return commit(LayoutModel.move(configuration, id, zone, index))
     }
     Timer {
@@ -123,7 +123,7 @@ Rectangle {
         if (id && zone) {
             var next = LayoutModel.move(configuration, id, zone, index)
             if (supported(next)) commit(next)
-            else feedback = "Доступны Task View после Виджетов и перестановка штатных групп внутри правой области."
+            else feedback = "Переносите компоненты между тремя областями. Показать рабочий стол остаётся справа."
         }
     }
     function resetLayout() {
@@ -165,7 +165,7 @@ Rectangle {
         property bool inCatalog: false
         readonly property bool knownHere: !!(info.seen && editor.monitor && (editor.monitor.primary || info.secondary))
         objectName: "component_" + componentId
-        readonly property bool movable: ["taskview","overflow","input","clock","network","volume"].indexOf(componentId)>=0 && editor.nativeAvailable && !editor.applying
+        readonly property bool movable: LayoutModel.movable(componentId) && editor.nativeAvailable && !editor.applying
         height: 52; radius:10
         color: mouse.pressed ? "#40ffffff" : mouse.containsMouse ? "#28ffffff" : "#15ffffff"
         border.width: 1; border.color: "#20ffffff"
@@ -175,7 +175,7 @@ Rectangle {
             anchors.left:parent.left; anchors.leftMargin:36; anchors.right:parent.right; anchors.rightMargin:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
             Label { width:parent.width; text:chip.info.label; font.pixelSize:11; maximumLineCount:1; elide:Text.ElideRight }
             Label { width:parent.width; font.pixelSize:9; opacity:0.6
-                text: chip.movable ? (componentId === "taskview" ? "После Виджетов слева" : "Любая позиция справа") : ""
+                text: chip.movable ? (componentId === "apps" ? "Вся группа, исходный порядок приложений" : "Слева, в центре или справа") : ""
                 visible:chip.movable
             }
         }
@@ -194,7 +194,7 @@ Rectangle {
                 Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
             }
         }
-        ToolTip.text: chip.movable ? (componentId === "taskview" ? "Task View → Слева, после Виджетов" : "Перестановка оригинальных групп справа; сеть и громкость переносятся вместе") : LayoutModel.movementBlocker(componentId,
+        ToolTip.text: chip.movable ? "Перенос исходного компонента; сеть и громкость вместе. Нужна нижняя панель 100%, 48 DIP, DPI 100%." : LayoutModel.movementBlocker(componentId,
             !!(editor.monitor && editor.monitor.primary), !!(editor.system && editor.system.componentPlacementAvailable))
         Accessible.name: info.label
         MouseArea {

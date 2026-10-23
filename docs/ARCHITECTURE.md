@@ -234,3 +234,5 @@ confirmedComponentV1. Перед восстановлением нового п�
 проверки: [STARTUP_RECOVERY.md](STARTUP_RECOVERY.md).
 
 Новый opt-in адаптер TaskbarComponentPlacement.h использует исходные Arrange slots после неизменённого владельца; source/layout identity, лимиты повторов и текущие model indices проверяются. Подключён только к ограниченной developer-сессии, без GUI/persist. См. TASKBAR_REORDER_FEASIBILITY.md, этап 23 октября.
+
+GUI использует slots через общий native-host либо --components без экспериментального 60-секундного ограничения. Поздний отказ отправляет одно уведомление slots-lost с serial; Qt отбрасывает устаревшие уведомления по serial и поколению процесса. Новые применения сохраняются в existing confirmedComponentV1 только после ack; второй монитор в GUI пока закрыт для новых переносов.

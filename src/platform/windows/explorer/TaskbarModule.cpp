@@ -259,6 +259,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             if(packet->dwData==placementProtocol) {
                 if(!state->buttonEdit.reset() || !state->trayOrder.reset())status=E_ABORT;
                 if(SUCCEEDED(status))status=state->placement.configure(hwnd,request);
+                if(SUCCEEDED(status) && request.count)state->placement.notifyFailure(state->owner,hwnd,request.serial);
             }
             const auto report=state->placement.report(status);
             COPYDATASTRUCT reply{placementReportProtocol,sizeof(report),const_cast<ComponentLayoutReport*>(&report)};
