@@ -14,16 +14,19 @@ namespace umbrella::explorer::components {
 using namespace winrt::Windows::UI::Xaml;
 // Called only by an explicit diagnostic request on the existing Explorer UI
 // thread. Bounded snapshot, no retained XAML objects, subscriptions or polling.
-inline ComponentSnapshot inspect(HWND hwnd) noexcept {
-    ComponentSnapshot result;
+inline std::unique_ptr<ComponentSnapshot> inspect(HWND hwnd) noexcept {
+    // Never reserve the bounded diagnostic packet on Explorer's message stack.
+    auto snapshot=std::unique_ptr<ComponentSnapshot>(new(std::nothrow) ComponentSnapshot);
+    if(!snapshot)return {};
+    auto& result=*snapshot;
     try {
         auto root = context_menu::taskbarElement(hwnd);
-        if (!root || !root.XamlRoot()) return result;
+        if (!root || !root.XamlRoot()) return snapshot;
         // Include SystemTray siblings of TaskbarFrame without crossing XamlRoot.
         for (unsigned i = 0; i < 8; ++i) {
             auto parent = Media::VisualTreeHelper::GetParent(root).try_as<FrameworkElement>();
             if (!parent) break;
-            if (parent.XamlRoot() != root.XamlRoot() || i == 7) return result;
+            if (parent.XamlRoot() != root.XamlRoot() || i == 7) return snapshot;
             root = parent;
         }
         std::vector<DependencyObject> pending{root};
@@ -32,7 +35,7 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
         std::vector<FrameworkElement> owners;
         unsigned visited = 0;
         while (!pending.empty()) {
-            if (++visited > 512) { result.status = E_ABORT; return result; }
+            if (++visited > 512) { result.status = E_ABORT; return snapshot; }
             auto node = pending.back(); pending.pop_back();
             if (auto element = node.try_as<FrameworkElement>()) {
                 const auto type = winrt::get_class_name(element);
@@ -43,7 +46,7 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                 // conditional groups, without assigning movement capability.
                 const bool traySlot=parent && parent.Name()==L"SystemTrayFrameGrid" && parent.try_as<Controls::StackPanel>();
                 if (role != taskbar::Component::Unknown || traySlot) {
-                    if (result.count == maxComponentSnapshot) { result.status = E_ABORT; return result; }
+                    if (result.count == maxComponentSnapshot) { result.status = E_ABORT; return snapshot; }
                     auto& entry = result.entries[result.count++];
                     wcsncpy_s(entry.id, traySlot && role==taskbar::Component::Unknown ? L"tray-slot" : taskbar::stableId(role), _TRUNCATE);
                     wcsncpy_s(entry.type, type.c_str(), _TRUNCATE);
@@ -92,11 +95,11 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                 }
             }
             const int count = Media::VisualTreeHelper::GetChildrenCount(node);
-            if (count < 0 || pending.size() + count > 512) { result.status = E_ABORT; return result; }
+            if (count < 0 || pending.size() + count > 512) { result.status = E_ABORT; return snapshot; }
             for (int i = 0; i < count; ++i) pending.push_back(Media::VisualTreeHelper::GetChild(node, i));
         }
         result.visited = visited; result.status = S_OK;
     } catch (...) { result.status = winrt::to_hresult(); }
-    return result;
+    return snapshot;
 }
 }

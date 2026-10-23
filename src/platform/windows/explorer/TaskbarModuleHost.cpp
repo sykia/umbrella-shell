@@ -39,6 +39,14 @@ ComponentLayoutReport placementReply;
 bool placementReceived=false;
 unsigned placementSerial=0;
 bool fixtureNativeTouched = false;
+constexpr UINT stackFixtureMessage=WM_APP+37;
+LRESULT CALLBACK stackFixtureProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp) {
+    if(message==stackFixtureMessage) {
+        if(wp>12)return 0;
+        return wp ? 1+SendMessageW(window,message,wp-1,0) : 1;
+    }
+    return DefWindowProcW(window,message,wp,lp);
+}
 LRESULT CALLBACK observerFixtureProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp) {
     if (message==WM_COPYDATA || message==RegisterWindowMessageW(attachMessage) || message==RegisterWindowMessageW(restoreMessage)) fixtureNativeTouched=true;
     return DefWindowProcW(window,message,wp,lp);
@@ -406,11 +414,14 @@ int wmain(int argc, wchar_t** argv) {
     if (fixture) {
         WNDCLASSW testType = ownerType;
         testType.lpszClassName = L"Umbrella.Taskbar.ModuleFixture.1";
-        testType.lpfnWndProc = inspectFixture ? observerFixtureProcedure : DefWindowProcW;
+        testType.lpfnWndProc = inspectFixture ? observerFixtureProcedure : stackFixtureProcedure;
         RegisterClassW(&testType);
         test = CreateWindowW(testType.lpszClassName, L"Umbrella module geometry test", WS_POPUP,
                              0, 0, GetSystemMetrics(SM_CXSCREEN), 48, nullptr, nullptr, testType.hInstance, nullptr);
         failed = !test || !attach(test);
+        // Exercise nested native dispatch on our own hidden window only.
+        // A diagnostic packet on every subclass frame exhausted the UI stack.
+        if(!failed && !inspectFixture && SendMessageW(test,stackFixtureMessage,12,0)!=13)failed=true;
     } else if (inspectComponents) {
         for (const auto window : umbrella::platform::taskbarWindows()) {
             if (!isExplorer(window) || !attach(window)) { failed = true; break; }

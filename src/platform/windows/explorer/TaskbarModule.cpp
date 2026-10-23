@@ -271,10 +271,11 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             const auto& request = *static_cast<const Configuration*>(packet->lpData);
             if (request.size != sizeof(Configuration) || request.version != 3 || request.enabled) return FALSE;
             auto snapshot = components::inspect(hwnd);
-            COPYDATASTRUCT reply{componentSnapshotProtocol, sizeof(snapshot), &snapshot};
+            if(!snapshot)return FALSE;
+            COPYDATASTRUCT reply{componentSnapshotProtocol, sizeof(*snapshot), snapshot.get()};
             DWORD_PTR received{};
             return SendMessageTimeoutW(state->owner, WM_COPYDATA, reinterpret_cast<WPARAM>(hwnd),
-                reinterpret_cast<LPARAM>(&reply), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &received) && received && SUCCEEDED(snapshot.status);
+                reinterpret_cast<LPARAM>(&reply), SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &received) && received && SUCCEEDED(snapshot->status);
         }
         if (packet && packet->dwData == editProtocol && packet->cbData == sizeof(EditRequest) && packet->lpData) {
             const auto request = *static_cast<const EditRequest*>(packet->lpData);
@@ -532,7 +533,8 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK UmbrellaTaskbarInspectHook(int
                 }();
                 if (retained) {
                     const auto snapshot=components::inspect(call->hwnd);
-                    COPYDATASTRUCT packet{componentSnapshotProtocol,sizeof(snapshot),const_cast<ComponentSnapshot*>(&snapshot)};
+                    if(!snapshot)return CallNextHookEx(nullptr,code,wparam,lparam);
+                    COPYDATASTRUCT packet{componentSnapshotProtocol,sizeof(*snapshot),snapshot.get()};
                     DWORD_PTR accepted{};
                     SendMessageTimeoutW(observer,WM_COPYDATA,reinterpret_cast<WPARAM>(call->hwnd),
                         reinterpret_cast<LPARAM>(&packet),SMTO_ABORTIFHUNG,1000,&accepted);
