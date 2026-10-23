@@ -1,9 +1,22 @@
 #include "platform/windows/explorer/TaskbarModuleProtocol.h"
+#include "platform/windows/explorer/TaskbarPlacementCommand.h"
 #include <cstdlib>
 #include <iostream>
 using namespace umbrella::explorer;
 void require(bool value,const char* message){ if(!value){std::cerr<<message<<'\n';std::exit(1);} }
 int main(){
+    PlacementCommand command;
+    require(parsePlacementCommand("slots \\\\.\\DISPLAY1 8 start:0 clock:2\n",command) && command.request.count==2,"Bounded placement command rejected");
+    require(parsePlacementCommand("slots \\\\.\\DISPLAY2 reset\n",command) && !command.request.count,"Explicit placement reset rejected");
+    require(parsePlacementCommand("slots-status \\\\.\\DISPLAY1\n",command) && command.statusOnly,"Read-only placement status rejected");
+    for(const auto bad:{"layout \\\\.\\DISPLAY1 probe\n","slots \\\\.\\DISPLAY1 8\n","slots \\\\.\\DISPLAY1 8 start:0 start:1\n",
+        "slots \\\\.\\DISPLAY1 8 start:3\n","slots \\\\.\\DISPLAY1 97 start:0\n","slots \\\\.\\DISPLAY1 8 invalid:0\n",
+        "slots \\\\.\\DISPLAY1 8 desktop:0\n","slots \\\\.\\DISPLAY1 8 desktop:2 clock:2\n",
+        "slots \\\\.\\DISPLAYX 8 start:0\n","slots \\\\.\\DISPLAY1 reset clock:0\n","slots-status \\\\.\\DISPLAY1 extra\n",
+        "slots \\\\.\\DISPLAY1 8 clock:0"})require(!parsePlacementCommand(bad,command),"Malformed/legacy placement command accepted");
+    ComponentLayoutRequest request;
+    request.flags=1;require(!validComponentLayout(request),"Retired layout replacement probe reached native placement");
+    request={};request.version=2;require(!validComponentLayout(request),"Unknown native placement version accepted");
     ComponentSnapshot packet;
     require(validComponentSnapshot(packet),"Failure report framing rejected");
     packet.version=1;

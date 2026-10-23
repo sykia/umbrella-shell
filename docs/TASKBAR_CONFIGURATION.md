@@ -415,3 +415,5 @@ cmake --build --preset release --target umbrella_configuration_desktop_test
 рядом с exe в игнорируемом tmp/configuration-prototype. Её можно запустить
 отдельно от установки. Это проверочная сборка без нового installer;
 полная CMake/deployment-проверка CI и VM по-прежнему не выполнена.
+
+Developer-межзонные переносы проверены отдельно от GUI; актуальные результаты и ограничения: [этап 23 октября](TASKBAR_REORDER_FEASIBILITY.md).

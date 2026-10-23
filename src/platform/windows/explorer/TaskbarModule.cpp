@@ -7,6 +7,7 @@
 #include "TaskbarButtonEdit.h"
 #include "TaskbarComponentSnapshot.h"
 #include "TaskbarTrayOrder.h"
+#include "TaskbarComponentPlacement.h"
 #include <shellapi.h>
 #include <CommCtrl.h>
 #include <array>
@@ -24,6 +25,7 @@ struct State {
     smooth_clip::Session smooth;
     button_edit::Session buttonEdit;
     tray_order::Session trayOrder;
+    component_layout::Session placement;
     bool detached = false;
     SIZE clipSize{};
     UINT clipDpi{};
@@ -215,6 +217,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         state->visuals.suspend(); return TRUE;
     }
     if (message == RegisterWindowMessageW(restoreMessage) || message == WM_NCDESTROY) {
+        const bool placementRestored=state->placement.reset();
         const bool trayRestored=state->trayOrder.reset();
         const bool buttonRestored=state->buttonEdit.reset(); // Includes owner-death recovery before DLL teardown.
         state->restoring = true;
@@ -244,11 +247,25 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                          state->original.bottom - state->original.top,
                          SWP_NOACTIVATE | SWP_NOZORDER);
         dispose(state);
-        if(message!=WM_NCDESTROY)return trayRestored && buttonRestored ? TRUE : FALSE;
+        if(message!=WM_NCDESTROY)return placementRestored && trayRestored && buttonRestored ? TRUE : FALSE;
         return DefSubclassProc(hwnd, message, wparam, lparam);
     }
     if (message == WM_COPYDATA && reinterpret_cast<HWND>(wparam) == state->owner) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lparam);
+        if(packet && (packet->dwData==placementProtocol || packet->dwData==placementStatusProtocol) && packet->cbData==sizeof(ComponentLayoutRequest) && packet->lpData) {
+            const auto request=*static_cast<const ComponentLayoutRequest*>(packet->lpData);
+            if(!validComponentLayout(request) || (packet->dwData==placementStatusProtocol && request.count))return FALSE;
+            HRESULT status=S_OK;
+            if(packet->dwData==placementProtocol) {
+                if(!state->buttonEdit.reset() || !state->trayOrder.reset())status=E_ABORT;
+                if(SUCCEEDED(status))status=state->placement.configure(hwnd,request);
+            }
+            const auto report=state->placement.report(status);
+            COPYDATASTRUCT reply{placementReportProtocol,sizeof(report),const_cast<ComponentLayoutReport*>(&report)};
+            DWORD_PTR received{};
+            return SendMessageTimeoutW(state->owner,WM_COPYDATA,reinterpret_cast<WPARAM>(hwnd),reinterpret_cast<LPARAM>(&reply),
+                SMTO_ABORTIFHUNG|SMTO_BLOCK,1000,&received) && received;
+        }
         if (packet && packet->dwData == componentInspectProtocol && packet->cbData == sizeof(Configuration) && packet->lpData) {
             const auto& request = *static_cast<const Configuration*>(packet->lpData);
             if (request.size != sizeof(Configuration) || request.version != 3 || request.enabled) return FALSE;
@@ -262,6 +279,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             const auto request = *static_cast<const EditRequest*>(packet->lpData);
             if (request.size != sizeof(request) || request.version != 1 || request.action > EditAction::TrayOrder) return FALSE;
             HRESULT status = S_OK;
+            if(request.action!=EditAction::Inspect && request.action!=EditAction::Status && !state->placement.reset())return FALSE;
             if (request.action == EditAction::Begin) {
                 // Experiment never combines with resizing, islands or native edge changes.
                 status = state->enabled ? E_ACCESSDENIED : state->buttonEdit.begin(hwnd);

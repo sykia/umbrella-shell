@@ -232,3 +232,5 @@ TaskbarRuntime в Windows-адаптере владеет mutex сеанса, HK
 confirmedComponentV1. Перед восстановлением нового поколения Explorer закрывается
 старый native-сеанс; недействительные HWND не используются. Детали и пределы
 проверки: [STARTUP_RECOVERY.md](STARTUP_RECOVERY.md).
+
+Новый opt-in адаптер TaskbarComponentPlacement.h использует исходные Arrange slots после неизменённого владельца; source/layout identity, лимиты повторов и текущие model indices проверяются. Подключён только к ограниченной developer-сессии, без GUI/persist. См. TASKBAR_REORDER_FEASIBILITY.md, этап 23 октября.

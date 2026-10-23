@@ -1,4 +1,5 @@
 #include "TaskbarModuleProtocol.h"
+#include "TaskbarPlacementCommand.h"
 #include "../TaskbarWindows.h"
 #include "NativeTaskbarLayout.h"
 #include "TaskbarIslands.h"
@@ -30,6 +31,12 @@ bool verifyOwnerDeath = false;
 bool configureTaskview = false, verifyPlacement = false;
 bool inspectComponents = false;
 bool inspectFixture = false;
+bool placementSession=false;
+constexpr UINT placementMessage=WM_APP+23;
+std::mutex placementMutex;
+PlacementCommand pendingPlacement;
+ComponentLayoutReport placementReply;
+bool placementReceived=false;
 bool fixtureNativeTouched = false;
 LRESULT CALLBACK observerFixtureProcedure(HWND window,UINT message,WPARAM wp,LPARAM lp) {
     if (message==WM_COPYDATA || message==RegisterWindowMessageW(attachMessage) || message==RegisterWindowMessageW(restoreMessage)) fixtureNativeTouched=true;
@@ -114,6 +121,33 @@ void restore() {
     attachments.clear();
 }
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if(message==WM_COPYDATA && nativeEditTarget && reinterpret_cast<HWND>(wp)==nativeEditTarget) {
+        const auto* packet=reinterpret_cast<const COPYDATASTRUCT*>(lp);
+        if(packet && packet->dwData==placementReportProtocol) {
+            if(packet->cbData!=sizeof(ComponentLayoutReport) || !packet->lpData)return FALSE;
+            const auto reply=*static_cast<const ComponentLayoutReport*>(packet->lpData);
+            if(reply.size!=sizeof(reply) || reply.version!=1 || reply.bound>1 || reply.items>64 || reply.failurePhase>7)return FALSE;
+            placementReply=reply;placementReceived=true;return TRUE;
+        }
+    }
+    if(message==placementMessage) {
+        PlacementCommand command;
+        {const std::lock_guard lock(placementMutex);command=pendingPlacement;}
+        for(const auto& attachment:attachments) {
+            MONITORINFOEXW info{};info.cbSize=sizeof(info);char device[64]{};
+            if(!GetMonitorInfoW(MonitorFromWindow(attachment.window,MONITOR_DEFAULTTONULL),&info))continue;
+            WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,device,64,nullptr,nullptr);
+            if(std::strcmp(device,command.device))continue;
+            nativeEditTarget=attachment.window;placementReceived=false;placementReply={};
+            COPYDATASTRUCT packet{command.statusOnly?placementStatusProtocol:placementProtocol,sizeof(command.request),&command.request};DWORD_PTR accepted{};
+            const bool transport=SendMessageTimeoutW(attachment.window,WM_COPYDATA,reinterpret_cast<WPARAM>(owner),reinterpret_cast<LPARAM>(&packet),SMTO_ABORTIFHUNG,3000,&accepted) && accepted && placementReceived;
+            nativeEditTarget=nullptr;
+            std::printf("slots-report %s status=%08lx bound=%u items=%u passes=%u phase=%u item=%u\n",device,static_cast<unsigned long>(placementReply.status),placementReply.bound,placementReply.items,placementReply.passes,placementReply.failurePhase,placementReply.failureItem);
+            const bool ok=transport && (command.statusOnly || SUCCEEDED(placementReply.status));
+            std::printf(ok?(command.statusOnly?"slots-status %s\n":"slots-ok %s\n"):"slots-refused %s\n",device);std::fflush(stdout);return ok;
+        }
+        std::printf("slots-refused %s\n",command.device);std::fflush(stdout);return FALSE;
+    }
     if (message == WM_COPYDATA && inspectComponents && snapshotWindow && reinterpret_cast<HWND>(wp) == snapshotWindow) {
         const auto* packet = reinterpret_cast<const COPYDATASTRUCT*>(lp);
         if (!packet || packet->dwData != componentSnapshotProtocol || packet->cbData != sizeof(ComponentSnapshot) || !packet->lpData) return FALSE;
@@ -313,7 +347,9 @@ int wmain(int argc, wchar_t** argv) {
         return 0;
     }
     inspectFixture=argc==2 && !wcscmp(argv[1],L"--fixture-inspect-components");
-    const bool fixture = inspectFixture || (argc == 2 && !wcscmp(argv[1], L"--fixture"));
+    const bool placementFixture=argc==2 && !wcscmp(argv[1],L"--fixture-placement");
+    placementSession=placementFixture || (argc==2 && !wcscmp(argv[1],L"--placement-session"));
+    const bool fixture = inspectFixture || placementFixture || (argc == 2 && !wcscmp(argv[1], L"--fixture"));
     const bool serve = argc == 2 && !wcscmp(argv[1], L"--serve");
     const bool inspect = argc == 2 && !wcscmp(argv[1], L"--inspect-taskview");
     inspectComponents = inspectFixture || (argc == 2 && !wcscmp(argv[1], L"--inspect-components"));
@@ -322,18 +358,18 @@ int wmain(int argc, wchar_t** argv) {
     verifyPlacement = argc == 2 && !wcscmp(argv[1], L"--verify-taskview-placement");
     const bool verify = verifyPlacement || verifyOwnerDeath || (argc == 2 && !wcscmp(argv[1], L"--verify-taskview"));
     editExperiment = inspectComponents || configureTaskview || inspect || verify || (argc == 4 && !wcscmp(argv[1], L"--edit-taskview") && !wcscmp(argv[2], L"--seconds"));
-    if ((serve || editExperiment) && !inspectComponents && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
+    if ((serve || editExperiment || placementSession) && !inspectComponents && FindWindowExW(HWND_MESSAGE, nullptr, ownerClass, nullptr)) {
         std::puts("FAILED; another Umbrella taskbar session is active"); return 5;
     }
-    if (editExperiment && !inspectFixture && !native_layout::installedBuildSupported()) {
+    if ((editExperiment || placementSession) && !fixture && !native_layout::installedBuildSupported()) {
         std::puts("FAILED; taskview experiment requires the exact supported taskbar DLLs"); return 5;
     }
-    if (!fixture && !serve && !editExperiment && (argc != 5 || wcscmp(argv[1], L"--width") || wcscmp(argv[3], L"--seconds"))) {
+    if (!fixture && !serve && !editExperiment && !placementSession && (argc != 5 || wcscmp(argv[1], L"--width") || wcscmp(argv[3], L"--seconds"))) {
         std::puts("Usage: UmbrellaTaskbarHost --fixture | --fixture-inspect-components | --inspect-components | --serve | --width 40..100 --seconds 1..120 | --inspect-taskview | --edit-taskview --seconds 1..120 | --verify-taskview | --verify-taskview-owner-death");
         return 2;
     }
-    unsigned width = fixture ? 75 : serve || editExperiment ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
-    unsigned seconds = verify ? 120 : fixture || serve || inspect || inspectComponents || configureTaskview ? 1 : editExperiment ? static_cast<unsigned>(_wtoi(argv[3])) : static_cast<unsigned>(_wtoi(argv[4]));
+    unsigned width = fixture ? 75 : serve || editExperiment || placementSession ? 100 : static_cast<unsigned>(_wtoi(argv[2]));
+    unsigned seconds = verify ? 120 : fixture || serve || inspect || inspectComponents || configureTaskview || placementSession ? 1 : editExperiment ? static_cast<unsigned>(_wtoi(argv[3])) : static_cast<unsigned>(_wtoi(argv[4]));
     if (width < 40 || width > 100 || seconds < 1 || seconds > 120) return 2;
     std::array<wchar_t, 32768> path{};
     GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
@@ -362,6 +398,8 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto window : umbrella::platform::taskbarWindows()) {
             if (!isExplorer(window) || !attach(window)) { failed = true; break; }
         }
+    } else if(placementSession) {
+        for(const auto window:umbrella::platform::taskbarWindows())if(!isExplorer(window) || !attach(window)){failed=true;break;}
     } else if (editExperiment) {
         const HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
         RECT rect{}; MONITORINFO monitor{sizeof(monitor)};
@@ -388,7 +426,7 @@ int wmain(int argc, wchar_t** argv) {
         } else if (!attach(primary)) { std::puts("FAILED; primary taskbar attach handshake refused"); failed = true; }
     } else for (const auto window : umbrella::platform::taskbarWindows()) if (!collect(window, 0)) break;
     if (attachments.empty()) failed = true;
-    if (!serve && !editExperiment) for (const auto& value : attachments) {
+    if (!serve && !editExperiment && !placementSession) for (const auto& value : attachments) {
         if (!configure(value.window, width, true)) { failed = true; break; }
         RECT now{};
         GetWindowRect(value.window, &now);
@@ -454,6 +492,19 @@ int wmain(int argc, wchar_t** argv) {
         snapshotWindow = nullptr;
         restore(); if (inspectFixture && fixtureNativeTouched) failed=true;
         if (test) DestroyWindow(test); DestroyWindow(owner);
+    } else if(placementSession && !failed) {
+        inputThread=CreateThread(nullptr,0,[](void*)->DWORD {
+            char line[1024]{};
+            while(std::fgets(line,sizeof(line),stdin)) {
+                PlacementCommand command;
+                if(!parsePlacementCommand(line,command)){std::puts("slots-refused invalid-request");std::fflush(stdout);break;}
+                {const std::lock_guard lock(placementMutex);pendingPlacement=command;}
+                SendMessageW(owner,placementMessage,0,0);
+            }
+            PostMessageW(owner,WM_CLOSE,0,0);return 0;
+        },nullptr,0,nullptr);
+        if(!inputThread || !SetTimer(owner,1,60000,nullptr)){failed=true;PostMessageW(owner,WM_CLOSE,0,0);}
+        else {std::puts("slots-ready");std::fflush(stdout);}
     } else if (editExperiment && !failed) {
         const bool ok = SendMessageW(owner, editMessage, static_cast<WPARAM>(inspect || configureTaskview || verifyPlacement ? EditAction::Inspect : EditAction::Begin), 0) != 0;
         if (inspect || !ok) {
