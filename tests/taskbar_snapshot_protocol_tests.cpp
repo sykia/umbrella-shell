@@ -9,10 +9,12 @@ int main(){
     packet.version=1;
     require(!validComponentSnapshot(packet),"Old module snapshot ABI accepted by new host");
     packet.version=2;
-    require(!validComponentSnapshot(packet),"v2 snapshot accepted as v4");
+    require(!validComponentSnapshot(packet),"v2 snapshot accepted as v5");
     packet.version=3;
     require(!validComponentSnapshot(packet),"v3 snapshot accepted with a different entry size");
-    packet.version=4; packet.size=sizeof(packet)-sizeof(ComponentSnapshotEntry);
+    packet.version=4;
+    require(!validComponentSnapshot(packet),"v4 snapshot accepted without source contracts");
+    packet.version=5; packet.size=sizeof(packet)-sizeof(ComponentSnapshotEntry);
     require(!validComponentSnapshot(packet),"Truncated module snapshot accepted");
     packet.size=sizeof(packet); packet.count=maxComponentSnapshot+1;
     require(!validComponentSnapshot(packet),"Packet could index beyond fixed entries");
@@ -25,11 +27,20 @@ int main(){
     require(!validComponentSnapshot(packet),"Successful owner without identities/index accepted");
     owner.ownerId=owner.containerId=1; owner.modelIndex=0; owner.ownerDepth=7;
     require(validComponentSnapshot(packet),"Bounded wrapped owner rejected");
+    owner.sourceStatus=S_OK;owner.sourceContracts=SourceVectorView|SourceNotifyCollection;
+    require(validComponentSnapshot(packet),"Read-only indexed source metadata rejected");
+    owner.sourceContracts|=0x80000000u;
+    require(!validComponentSnapshot(packet),"Unknown source interface flags accepted");
+    owner.sourceContracts=SourceVectorView;owner.sourceStatus=E_ABORT;
+    require(!validComponentSnapshot(packet),"Failed source query retained apparent capabilities");
+    owner.sourceContracts=0;owner.sourceStatus=E_NOINTERFACE;
     owner.ownerDepth=8;
     require(!validComponentSnapshot(packet),"Unbounded owner ancestry accepted");
     owner.ownerDepth=0; owner.containerId=2;
     require(!validComponentSnapshot(packet),"Out-of-snapshot container identity accepted");
     owner.containerId=1; owner.ownerStatus=E_ABORT;
     require(!validComponentSnapshot(packet),"Failed owner retained apparently usable model identity");
-    std::cout<<"Passed: v1/v2/v3/v4 mismatch, truncated snapshot, array/traversal bounds and explicit failure framing. No Explorer.\n";
+    owner.ownerId=owner.containerId=0;owner.modelIndex=-1;owner.sourceStatus=S_OK;
+    require(!validComponentSnapshot(packet),"Source metadata without a valid owner accepted");
+    std::cout<<"Passed: v1-v5 mismatch, snapshot bounds, source contracts and explicit failure framing. No Explorer.\n";
 }

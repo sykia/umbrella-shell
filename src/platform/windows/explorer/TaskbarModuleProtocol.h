@@ -59,11 +59,19 @@ struct EditReport {
 inline constexpr ULONG_PTR componentInspectProtocol = protocol + 4;
 inline constexpr ULONG_PTR componentSnapshotProtocol = protocol + 5;
 inline constexpr unsigned maxComponentSnapshot = 48;
+// Interface discovery is read-only; none of these flags grants model mutation.
+enum SourceContract : std::uint32_t {
+    SourceVector=1,SourceVectorView=2,SourceBindableVector=4,
+    SourceNotifyCollection=8,SourceObservableVector=16,SourceBindableObservable=32
+};
+inline constexpr std::uint32_t knownSourceContracts=63;
 struct ComponentSnapshotEntry {
     wchar_t id[24]{}, type[96]{}, parentType[96]{}, parentName[80]{};
     wchar_t name[64]{}, sourceType[64]{};
     wchar_t layoutType[96]{};
     HRESULT layoutStatus = E_NOINTERFACE;
+    HRESULT sourceStatus = E_NOINTERFACE;
+    std::uint32_t sourceContracts{};
     std::int32_t modelIndex = -1;
     wchar_t ownerType[96]{};
     HRESULT ownerStatus = E_NOINTERFACE;
@@ -72,21 +80,24 @@ struct ComponentSnapshotEntry {
     std::uint32_t visible{}, hitTestVisible{};
 };
 struct ComponentSnapshot {
-    std::uint32_t size = sizeof(ComponentSnapshot), version = 4;
+    std::uint32_t size = sizeof(ComponentSnapshot), version = 5;
     HRESULT status = E_FAIL;
     std::uint32_t count{}, visited{};
     ComponentSnapshotEntry entries[maxComponentSnapshot]{};
 };
 static_assert(sizeof(ComponentSnapshot) < 65536);
 inline bool validComponentSnapshot(const ComponentSnapshot& snapshot) noexcept {
-    if (snapshot.size!=sizeof(ComponentSnapshot) || snapshot.version!=4 ||
+    if (snapshot.size!=sizeof(ComponentSnapshot) || snapshot.version!=5 ||
         snapshot.count>maxComponentSnapshot || snapshot.visited>512) return false;
     for(unsigned i=0;i<snapshot.count;++i) {
         const auto& entry=snapshot.entries[i];
+        if((entry.sourceContracts&~knownSourceContracts) ||
+            (FAILED(entry.sourceStatus) && entry.sourceContracts))return false;
         if (SUCCEEDED(entry.ownerStatus)) {
             if (entry.ownerDepth>=8 || entry.modelIndex<0 || !entry.ownerId || !entry.containerId ||
                 entry.ownerId>snapshot.count || entry.containerId>snapshot.count) return false;
-        } else if (entry.ownerDepth || entry.ownerId || entry.containerId || entry.modelIndex!=-1) return false;
+        } else if (entry.ownerDepth || entry.ownerId || entry.containerId || entry.modelIndex!=-1 ||
+            entry.sourceContracts || SUCCEEDED(entry.sourceStatus)) return false;
     }
     return true;
 }

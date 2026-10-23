@@ -132,6 +132,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
                 entry.visible, entry.hitTestVisible);
             std::printf("    layout=%ls status=%08lx modelIndex=%d\n",entry.layoutType,static_cast<unsigned long>(entry.layoutStatus),entry.modelIndex);
             std::printf("    name=%ls source=%ls\n",entry.name,entry.sourceType);
+            std::printf("    sourceStatus=%08lx sourceContracts=%02x\n",static_cast<unsigned long>(entry.sourceStatus),entry.sourceContracts);
             std::printf("    owner=%ls status=%08lx depth=%u containerId=%u ownerId=%u\n",entry.ownerType,static_cast<unsigned long>(entry.ownerStatus),entry.ownerDepth,entry.containerId,entry.ownerId);
         }
         reportReceived = true;

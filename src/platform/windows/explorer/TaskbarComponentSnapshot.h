@@ -2,6 +2,7 @@
 #include "TaskbarContextMenu.h"
 #include "TaskbarModuleProtocol.h"
 #include "TaskbarRepeaterAccess.h"
+#include "TaskbarSourceCapabilities.h"
 #include "core/taskbar/ComponentRegistry.h"
 #include "core/taskbar/Placement.h"
 #include <winrt/Windows.UI.Xaml.Automation.h>
@@ -26,7 +27,7 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
             root = parent;
         }
         std::vector<DependencyObject> pending{root};
-        struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type, sourceType; };
+        struct ParentLayout { FrameworkElement parent; HRESULT status; winrt::hstring type, sourceType; repeater::SourceCapabilities source; };
         std::vector<ParentLayout> layouts;
         std::vector<FrameworkElement> owners;
         unsigned visited = 0;
@@ -65,12 +66,15 @@ inline ComponentSnapshot inspect(HWND hwnd) noexcept {
                             repeater::Value layout{nullptr},source{nullptr};
                             const HRESULT status=repeater::layout(owner.container,layout);
                             const auto sourceStatus=repeater::itemsSource(owner.container,source);
+                            const auto capabilities=SUCCEEDED(sourceStatus) ? repeater::sourceCapabilities(source) : repeater::SourceCapabilities{sourceStatus,0};
                             layouts.push_back({owner.container,status,SUCCEEDED(status)&&layout ? winrt::get_class_name(layout) : winrt::hstring{},
-                                SUCCEEDED(sourceStatus)&&source ? winrt::get_class_name(source) : winrt::hstring{}});
+                                SUCCEEDED(sourceStatus)&&source ? winrt::get_class_name(source) : winrt::hstring{},capabilities});
                             cached=std::prev(layouts.end());
                         }
                         entry.containerId=static_cast<unsigned>(cached-layouts.begin())+1;
                         entry.layoutStatus=cached->status;
+                        entry.sourceStatus=cached->source.status;
+                        entry.sourceContracts=cached->source.contracts;
                         wcsncpy_s(entry.layoutType,cached->type.c_str(),_TRUNCATE);
                         wcsncpy_s(entry.sourceType,cached->sourceType.c_str(),_TRUNCATE);
                     }

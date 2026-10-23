@@ -7,6 +7,7 @@
 #include "platform/windows/explorer/TaskbarPanelOrder.h"
 #include "fixtures/AttachedLayout.h"
 #include "fixtures/ComponentLayout.h"
+#include "fixtures/NotifyCollectionSource.h"
 #include "core/taskbar/TrayOrder.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
@@ -52,6 +53,7 @@ struct ComponentLayoutFixture {
 }
 void exerciseLayoutRequest() {
     using namespace explorer;
+    require(repeater::sourceCapabilities(nullptr).status==E_INVALIDARG,"Null source query claimed success");
     ComponentLayoutRequest request;
     require(validComponentLayout(request),"Owned fixture reset rejected");
     request.flags=1;
@@ -113,6 +115,8 @@ void exerciseRepeaterContract() {
     // This fixture owns its source. Never perform this mutation on Explorer's
     // foreign source merely because its interface happens to be writable.
     auto data=winrt::single_threaded_observable_vector<explorer::repeater::Value>();
+    const auto vectorCapabilities=explorer::repeater::sourceCapabilities(data);
+    require(vectorCapabilities.liveIndexed() && (vectorCapabilities.contracts&explorer::SourceObservableVector),"Observable source contracts not detected");
     const std::array<Controls::Button,3> originals{};
     std::array<unsigned,3> nativeClicks{};
     for (unsigned i=0;i<originals.size();++i) {
@@ -407,6 +411,86 @@ void exerciseRepeaterContract() {
     require(FAILED(competingReport.status) && competingReport.failurePhase==6 && competingReport.passes<=3,"Fighting owner did not stop within its layout budget");
     forceOwner=false;commonRoot.LayoutUpdated(forceToken);
     require(competing.reset(),"Competing-owner observer cleanup failed");
+    // WinUI snapshots enumerable-only sources instead of observing their events.
+    auto enumerableOnly=winrt::make_self<tests::EnumerableNotifySource>();
+    for(const auto& item:data)enumerableOnly->rows.Append(item);
+    const auto enumerableValue=enumerableOnly.as<explorer::repeater::Value>();
+    const auto enumerableCapabilities=explorer::repeater::sourceCapabilities(enumerableValue);
+    require(!enumerableCapabilities.liveIndexed() && (enumerableCapabilities.contracts&explorer::SourceNotifyCollection),"Enumerable notifications incorrectly granted indexed capability");
+    winrt::check_hresult(reinterpret_cast<PutSource>(table[7])(contract.get(),winrt::get_abi(enumerableValue)));
+    explorer::component_layout::Session copiedSourceSession;
+    winrt::com_ptr<explorer::layout_contract::Attached> copiedBaseline;
+    explorer::repeater::Value copiedExpected{nullptr};
+    require(!explorer::component_layout::ComponentLayoutFixture::bind(copiedSourceSession,commonRoot,view,tray,priorLayout,customFactory,copiedBaseline,copiedExpected,{}),"Enumerable-only notifications granted live-model capability");
+    require(enumerableOnly->subscriptions.empty(),"Rejected enumerable-only source retained a subscription");
+    // The observed Explorer source advertises INotifyCollectionChanged rather
+    // than IObservableVector. Exercise that branch with our own enumerable data.
+    auto notifySource=winrt::make_self<tests::NotifyCollectionSource>();
+    for(const auto& item:data)notifySource->rows.Append(item);
+    const auto notifyValue=notifySource.as<explorer::repeater::Value>();
+    const auto notifyCapabilities=explorer::repeater::sourceCapabilities(notifyValue);
+    require(notifyCapabilities.liveIndexed() && (notifyCapabilities.contracts&explorer::SourceVectorView) && (notifyCapabilities.contracts&explorer::SourceNotifyCollection),"Read-only indexed notification contracts not detected");
+    require(!notifyValue.try_as<winrt::Windows::Foundation::Collections::IVector<explorer::repeater::Value>>(),"Read-only fixture unexpectedly exposed vector mutation");
+    require(!notifyValue.try_as<winrt::Windows::Foundation::Collections::IObservableVector<explorer::repeater::Value>>(),"Notify fixture unexpectedly exposed a writable observable model");
+    winrt::check_hresult(reinterpret_cast<PutSource>(table[7])(contract.get(),winrt::get_abi(notifyValue)));
+    commonRoot.UpdateLayout();
+    const auto subscribersBefore=notifySource->subscriptions.size();
+    explorer::component_layout::Session notifySession;
+    winrt::com_ptr<explorer::layout_contract::Attached> notifyBaseline;
+    explorer::repeater::Value notifyExpected{nullptr};
+    require(explorer::component_layout::ComponentLayoutFixture::bind(notifySession,commonRoot,view,tray,priorLayout,customFactory,notifyBaseline,notifyExpected,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},
+         {input,taskbar::Component::InputIndicators},{quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Notify-only source did not bind");
+    require(notifySource->subscriptions.size()==subscribersBefore+1,"Notify branch did not subscribe exactly once");
+    auto notifyRequest=coordinatedRequest;
+    notifyRequest.entries[3].zone=1; // Leave room for the third app beside Search.
+    require(SUCCEEDED(notifySession.configure(nullptr,notifyRequest)),"Notify-only source placement refused");
+    Controls::Button notifiedApp;notifiedApp.Width(80);notifiedApp.Height(48);
+    explorer::component_layout::ComponentLayoutFixture::addRole(notifySession,notifiedApp,taskbar::Component::Applications);
+    const auto notifyGeneration=explorer::component_layout::ComponentLayoutFixture::generation(notifySession);
+    notifySource->append(notifiedApp);
+    require(explorer::component_layout::ComponentLayoutFixture::generation(notifySession)>notifyGeneration,"Notify event did not invalidate the cache");
+    commonRoot.UpdateLayout();
+    if(FAILED(notifySession.report(S_OK).status) || notifySession.report(S_OK).items!=10 || Media::VisualTreeHelper::GetParent(notifiedApp)!=view)
+        std::cerr<<"Notify diagnostic status="<<std::hex<<notifySession.report(S_OK).status<<std::dec<<" items="<<notifySession.report(S_OK).items<<" phase="<<notifySession.report(S_OK).failurePhase<<" item="<<notifySession.report(S_OK).failureItem<<" parent="<<(Media::VisualTreeHelper::GetParent(notifiedApp)==view)<<'\n';
+    require(SUCCEEDED(notifySession.report(S_OK).status) && notifySession.report(S_OK).items==10 && Media::VisualTreeHelper::GetParent(notifiedApp)==view,"Notify append did not place the original new application");
+    notifySource->removeLast();commonRoot.UpdateLayout();
+    require(SUCCEEDED(notifySession.report(S_OK).status) && notifySession.report(S_OK).items==9,"Notify removal retained a stale application binding");
+    const auto idlePasses=notifySession.report(S_OK).passes;
+    for(unsigned i=0;i<10;++i)commonRoot.UpdateLayout();
+    require(notifySession.report(S_OK).passes==idlePasses,"Idle notify source repeatedly applied its layout");
+    const auto pumpOwnedMessages=[] {
+        MSG message{};
+        while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+    };
+    pumpOwnedMessages();
+    for(unsigned i=0;i<4;++i) {
+        notifySource->notify();commonRoot.UpdateLayout();
+        require(SUCCEEDED(notifySession.report(S_OK).status),"Legitimate later source updates exhausted an old layout budget");
+        pumpOwnedMessages();
+    }
+    require(notifySession.report(S_OK).passes>3,"Later dispatcher turns did not resume normal model updates");
+    require(notifySession.reset(),"Notify source failed to reset");
+    require(notifySource->subscriptions.size()==subscribersBefore,"Notify source retained the coordinator after reset");
+    winrt::check_hresult(explorer::repeater::layout(instance,retainedLayout));
+    require(retainedLayout==notifyExpected,"Notify reset replaced the original owner layout");
+    // Repeated reset events must not replenish the recovery budget inside one
+    // dispatcher turn: otherwise a layout/source feedback loop evades the cap.
+    explorer::component_layout::Session notificationLoop;
+    winrt::com_ptr<explorer::layout_contract::Attached> loopBaseline;
+    explorer::repeater::Value loopExpected{nullptr};
+    require(explorer::component_layout::ComponentLayoutFixture::bind(notificationLoop,commonRoot,view,tray,priorLayout,customFactory,loopBaseline,loopExpected,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},
+         {input,taskbar::Component::InputIndicators},{quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Notify-loop fixture did not bind");
+    require(SUCCEEDED(notificationLoop.configure(nullptr,notifyRequest)),"Notify-loop initial placement refused");
+    for(unsigned i=0;i<5;++i){notifySource->notify();tray.InvalidateArrange();commonRoot.UpdateLayout();}
+    const auto loopReport=notificationLoop.report(S_OK);
+    require(FAILED(loopReport.status) && loopReport.failurePhase==6 && loopReport.passes<=3,"Source reset events bypassed the layout attempt budget");
+    require(notificationLoop.reset(),"Notify-loop observers did not release");
+    require(notifySource->subscriptions.size()==subscribersBefore,"Notify-loop cleanup retained a subscription");
+    std::cout<<"Passed: read-only indexed notify source, original app arrival/removal, idle coalescing, subscription cleanup and enumerable-only rejection; no Explorer.\n";
     std::cout<<"Passed: coordinated original central/tray controls across all three regions, original XAML hit-testing/parents, unchanged owner Layout, dynamic app arrival and reset in an owned HWND.\n";
     source.Content(nullptr); source.Close();
     std::cout << "Passed: actual WinUI 2 model reorder/restore, original UIElement identities and native model indices in an owned source.\n";

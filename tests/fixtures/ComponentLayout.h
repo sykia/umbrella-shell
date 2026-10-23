@@ -3,6 +3,7 @@
 #include "AttachedLayout.h"
 #include "ComponentLayoutRequest.h"
 #include "core/taskbar/Reorder.h"
+#include "platform/windows/explorer/TaskbarSourceCapabilities.h"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <memory>
@@ -28,8 +29,9 @@ class Session {
         ComponentLayoutRequest request;
         HRESULT status=E_PENDING;
         unsigned passes=0,generation=0,appliedGeneration=~0u;
-        unsigned budgetGeneration=~0u,attempts=0;
-        double budgetWidth=-1,budgetHeight=-1;
+        unsigned attempts=0;
+        bool budgetResetQueued=false;
+        std::weak_ptr<Control> self;
         unsigned failurePhase=0,failureItem=0;
         std::vector<Binding> bindings;
         struct Role {UIElement item{nullptr};taskbar::Component role;};
@@ -169,14 +171,16 @@ class Session {
             for(unsigned i=0;i<c.request.count;++i)assignments.push_back({taskbar::componentFromId(c.request.entries[i].id),static_cast<taskbar::Zone>(c.request.entries[i].zone)});
             const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap);
             if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);fail(c,HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED));return;}
-            const auto width=c.root.ActualWidth(),height=c.root.ActualHeight();
-            if(c.budgetGeneration!=c.generation || c.budgetWidth!=width || c.budgetHeight!=height) {
-                c.budgetGeneration=c.generation;c.budgetWidth=width;c.budgetHeight=height;c.attempts=0;
-            }
             // If an owner continually reinstates its positions, give up well
-            // before XAML reports a layout cycle. Events never reset this budget
-            // unless the source, requested configuration or owner size changes.
+            // before XAML reports a layout cycle. Source reset/resize events must
+            // not replenish the budget inside the same dispatcher turn.
             if(c.attempts>=3){c.failurePhase=6;fail(c,E_ABORT);return;}
+            if(!c.budgetResetQueued) {
+                c.budgetResetQueued=true;
+                c.root.Dispatcher().RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Low,[weak=c.self] {
+                    if(auto state=weak.lock()){state->attempts=0;state->budgetResetQueued=false;}
+                });
+            }
             ++c.attempts;
             Adapter adapter{c};
             const auto result=taskbar::transact(plan.moves,adapter);
@@ -188,8 +192,11 @@ class Session {
         winrt::check_hresult(repeater::layout(c->repeater,c->layout));
         winrt::check_hresult(repeater::itemsSource(c->repeater,c->source));
         if(!c->layout || !c->source)return false;
+        // WinUI copies an IIterable-only source and does not track its events.
+        // Notifications alone must not grant live-model capability.
+        if(!repeater::sourceCapabilities(c->source).liveIndexed())return false;
         const std::weak_ptr<Control> weak=c;
-        control_=c;pin();
+        c->self=c;control_=c;pin();
         notifications_=c->source.try_as<Interop::INotifyCollectionChanged>();
         if(notifications_)changed_=notifications_.CollectionChanged([weak](auto&&,auto&&){if(auto state=weak.lock())++state->generation;});
         else {
