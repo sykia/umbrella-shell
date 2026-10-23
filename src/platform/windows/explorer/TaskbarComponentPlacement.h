@@ -23,6 +23,7 @@ class Session {
         taskbar::Component role=taskbar::Component::Unknown;
         winrt::Windows::Foundation::Rect slot{};
         taskbar::Rectangle measured;
+        winrt::Windows::Foundation::Rect committedSlot{};
     };
     struct Control {
         bool active=true,writing=false;
@@ -53,6 +54,7 @@ class Session {
     winrt::event_token changed_{};
     bool modelSubscribed_=false;
     winrt::event_token updated_{};bool subscribed_=false;
+    winrt::event_token traySize_{};bool traySizeSubscribed_=false;
 
     static void pin() noexcept {
         HMODULE module{};
@@ -181,11 +183,20 @@ class Session {
             // LayoutUpdated is a notification, never a polling timer. A stable
             // verified pass performs no writes and no tree scan.
             if(c.appliedGeneration==c.generation && !c.confirmed.empty() &&
+                c.epochWidth==c.root.ActualWidth() && c.epochHeight==c.root.ActualHeight() &&
                 c.repeaterChildren==Media::VisualTreeHelper::GetChildrenCount(c.repeater) &&
                 c.trayChildren==Media::VisualTreeHelper::GetChildrenCount(c.tray)) {
                 bool stable=true;
                 for(const auto& move:c.confirmed) {
-                    if(move.instance>c.bindings.size() || c.bindings[move.instance-1].element.Visibility()!=Visibility::Visible || !taskbar::same(bounds(c,c.bindings[move.instance-1].element),move.after)){stable=false;break;}
+                    if(move.instance>c.bindings.size()){stable=false;break;}
+                    const auto& binding=c.bindings[move.instance-1];
+                    const auto slot=Controls::Primitives::LayoutInformation::GetLayoutSlot(binding.element.as<FrameworkElement>());
+                    const auto expected=binding.committedSlot;
+                    // Native compositor animations may still be travelling to
+                    // the committed slot. Re-arranging from animated bounds
+                    // fights Explorer and can invalidate an otherwise valid move.
+                    if(binding.element.Visibility()!=Visibility::Visible || Media::VisualTreeHelper::GetParent(binding.element)!=binding.parent ||
+                        !taskbar::same({slot.X,slot.Y,slot.Width,slot.Height},{expected.X,expected.Y,expected.Width,expected.Height})) {stable=false;break;}
                 }
                 if(stable)return;
             }
@@ -201,7 +212,13 @@ class Session {
                 const auto& item=c.bindings[i];items.push_back({i+1,item.role,item.measured,item.role!=taskbar::Component::Unknown});
             }
             std::vector<taskbar::Assignment> assignments;assignments.reserve(c.request.count);
-            for(unsigned i=0;i<c.request.count;++i)assignments.push_back({taskbar::componentFromId(c.request.entries[i].id),static_cast<taskbar::Zone>(c.request.entries[i].zone)});
+            for(unsigned i=0;i<c.request.count;++i) {
+                const auto requested=taskbar::componentFromId(c.request.entries[i].id);
+                // Missing conditional groups retain placement intent without
+                // acquiring a fake slot or object. An empty plan still fails.
+                if(std::any_of(c.bindings.begin(),c.bindings.end(),[&](const auto& binding){return binding.role==requested;}))
+                    assignments.push_back({requested,static_cast<taskbar::Zone>(c.request.entries[i].zone)});
+            }
             const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap);
             if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);fail(c,HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED));return;}
             // If an owner continually reinstates its positions, give up well
@@ -224,6 +241,7 @@ class Session {
             Adapter adapter{c};
             const auto result=taskbar::transact(plan.moves,adapter);
             if(result!=taskbar::Transaction::Applied){if(!c.failurePhase)c.failurePhase=5;fail(c,result==taskbar::Transaction::RollbackFailed?E_UNEXPECTED:E_ABORT);return;}
+            for(auto& binding:c.bindings)binding.committedSlot=Controls::Primitives::LayoutInformation::GetLayoutSlot(binding.element.as<FrameworkElement>());
             c.confirmed=plan.moves;c.appliedGeneration=c.generation;c.status=S_OK;++c.passes;
         }catch(...){fail(c,winrt::to_hresult());}
     }
@@ -282,6 +300,7 @@ class Session {
         }
         modelSubscribed_=true;
         updated_=c->root.LayoutUpdated([weak](auto&&,auto&&){if(auto state=weak.lock())apply(*state);});subscribed_=true;
+        traySize_=c->tray.SizeChanged([weak](auto&&,auto&&){if(auto state=weak.lock())++state->generation;});traySizeSubscribed_=true;
         return true;
     }
 public:
@@ -315,6 +334,8 @@ public:
         if(!control_)return true;
         bool success=true;auto c=control_;c->active=false;
         try {if(subscribed_){c->root.LayoutUpdated(updated_);subscribed_=false;}}
+        catch(...){success=false;}
+        try {if(traySizeSubscribed_){c->tray.SizeChanged(traySize_);traySizeSubscribed_=false;}}
         catch(...){success=false;}
         try {
             if(modelSubscribed_) {

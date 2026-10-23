@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QSet>
 #include "platform/windows/TaskbarModuleSession.h"
 #include "platform/windows/TaskbarAppearance.h"
 
@@ -12,6 +13,7 @@ class TaskbarSettings final : public QObject {
     Q_PROPERTY(QString selectedAppearanceMonitor READ selectedAppearanceMonitor NOTIFY changed)
     Q_PROPERTY(QVariantMap activeComponentConfiguration READ activeComponentConfiguration NOTIFY changed)
     Q_PROPERTY(QString activeComponentMonitor READ activeComponentMonitor NOTIFY changed)
+    Q_PROPERTY(QVariantMap activeComponentConfigurations READ activeComponentConfigurations NOTIFY changed)
     Q_PROPERTY(bool componentPlacementAvailable READ sidesAvailable CONSTANT)
     Q_PROPERTY(bool available READ available NOTIFY changed)
     Q_PROPERTY(bool widthAvailable READ widthAvailable CONSTANT)
@@ -47,6 +49,8 @@ public:
     QVariantList layoutMonitors() const;
     QVariantMap activeComponentConfiguration() const { return activeComponentConfiguration_; }
     QString activeComponentMonitor() const { return activeComponentMonitor_; }
+    QVariantMap activeComponentConfigurations() const { return activeComponents_; }
+    Q_INVOKABLE QStringList componentIds(const QString& monitor,bool refresh=false);
     Q_INVOKABLE bool applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration);
     Q_INVOKABLE bool restoreComponentConfiguration(const QString& monitor);
     Q_INVOKABLE QVariantMap componentDraft(const QString& monitor) const;
@@ -59,13 +63,17 @@ public:
 signals:
     void changed();
 private:
+    bool applyNativeComponents(const QString& monitor,const QVariantMap& configuration);
+    bool resetNativeComponents(const QString& monitor);
+    bool persistConfirmedComponents();
+    bool replayConfirmedComponents();
     QString selectedAppearanceMonitor_;
     bool restored_ = false;
     QVariantMap activeComponentConfiguration_;
     QString activeComponentMonitor_;
-    bool trayInAppearance_=false;
-    bool placementInAppearance_=false;
-    QString trayDevice_;
+    QVariantMap activeComponents_,confirmedComponents_;
+    QSet<QString> appearanceComponents_,legacyTrayComponents_;
+    QHash<QString,QStringList> componentCatalogue_;
     bool available_ = false, autoHide_ = false, pending_ = false;
     QString status_;
     QString edge_ = "bottom";

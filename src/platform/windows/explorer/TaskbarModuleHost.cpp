@@ -167,6 +167,8 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         if (!packet || packet->dwData != componentSnapshotProtocol || packet->cbData != sizeof(ComponentSnapshot) || !packet->lpData) return FALSE;
         const auto snapshot = *static_cast<const ComponentSnapshot*>(packet->lpData);
         if (!validComponentSnapshot(snapshot)) return FALSE;
+        MONITORINFOEXW monitorInfo{};monitorInfo.cbSize=sizeof(monitorInfo);
+        if(GetMonitorInfoW(MonitorFromWindow(snapshotWindow,MONITOR_DEFAULTTONULL),&monitorInfo))std::printf("components-monitor %ls\n",monitorInfo.szDevice);
         std::printf("components status=%08lx count=%u visited=%u\n", static_cast<unsigned long>(snapshot.status), snapshot.count, snapshot.visited);
         if (SUCCEEDED(snapshot.status)) for (unsigned i = 0; i < snapshot.count; ++i) {
             auto entry = snapshot.entries[i];

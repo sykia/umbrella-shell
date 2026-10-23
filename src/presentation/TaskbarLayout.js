@@ -28,32 +28,48 @@ var catalog = [
     {id:"vpn", label:"VPN (состояние сети)", zone:"right"},
     {id:"chat", label:"Chat / Teams (зависит от версии)", zone:"center"},
     {id:"copilot", label:"Copilot (зависит от версии)", zone:"center"},
-    {id:"systemtray", label:"Системные / сторонние индикаторы", zone:"right"},
+    {id:"systemtray", label:"Системные индикаторы (вся группа)", zone:"right"},
     {id:"remote", label:"Удалённый сеанс / запись экрана", zone:"right"}
 ]
 function component(id) { return catalog.filter(function(c) { return c.id === id })[0] }
 function movementBlocker(id, primary, available) {
     if (!available) return "Нужны совместимые системные DLL и native-host рядом с приложением."
-    if (!primary) return "Native-перенос на дополнительной панели ещё не проверен."
     if (id === "desktop") return "Показать рабочий стол сохраняет крайний правый слот."
     if (!movable(id)) return "Для этого вложенного или условного компонента адаптер пока не подтверждён."
     return ""
 }
 function dragIds(id) { return id === "network" || id === "volume" ? ["network","volume"] : [id] }
-function movable(id) { return ["widgets","start","search","taskview","apps","overflow","input","network","volume","clock"].indexOf(id)>=0 }
+function movable(id) { return ["widgets","start","search","taskview","apps","overflow","input","network","volume","clock","systemtray","trayapps"].indexOf(id)>=0 }
 function remaining(items,id) { var group=dragIds(id); return items.filter(v => group.indexOf(v)<0) }
-function nativeConfiguration(value) {
+function nativeConfiguration(value, primary, ids) {
     if (!valid(value)) return false
-    if (JSON.stringify(value.available)!==JSON.stringify(defaults(true).available) || value.right[value.right.length-1]!=="desktop") return false
+    if (primary===undefined) primary=true
+    if (JSON.stringify(value.available)!==JSON.stringify(defaults(primary,ids).available) || (value.right.indexOf("desktop")>=0 && value.right[value.right.length-1]!=="desktop")) return false
     return ["left","center","right"].every(function(zone) {
         var list=value[zone], network=list.indexOf("network"), volume=list.indexOf("volume")
         return (network<0 && volume<0) || (network>=0 && volume===network+1)
     })
 }
-function defaults(primary) {
+function defaults(primary, ids) {
     var result = {version:1, available:[], left:[], center:[], right:[], gap:8}
-    catalog.forEach(function(c) { result[c.seen && (primary || c.secondary) ? c.zone : "available"].push(c.id) })
+    if(Array.isArray(ids)) {
+        catalog.forEach(c => { if(ids.indexOf(c.id)<0)result.available.push(c.id) })
+        ids.forEach(id => { var c=component(id);if(c)result[c.zone].push(id) })
+    } else catalog.forEach(function(c) { result[c.seen && (primary || c.secondary) ? c.zone : "available"].push(c.id) })
+    if(result.right.indexOf("desktop")>=0){result.right=result.right.filter(id=>id!=="desktop");result.right.push("desktop")}
     return result
+}
+function reconcile(value, primary, ids) {
+    var base=defaults(primary,ids)
+    if(!valid(value))return base
+    if(!Array.isArray(ids))return clone(value)
+    var next={version:1,gap:value.gap,available:base.available,left:[],center:[],right:[]}, placed=[]
+    for(var zone of ["left","center","right"])value[zone].forEach(id => {
+        if(ids.indexOf(id)>=0){next[zone].push(id);placed.push(id)}
+    })
+    for(var key of ["left","center","right"])base[key].forEach(id => {if(placed.indexOf(id)<0)next[key].push(id)})
+    if(next.right.indexOf("desktop")>=0){next.right=next.right.filter(id=>id!=="desktop");next.right.push("desktop")}
+    return next
 }
 function clone(value) { return JSON.parse(JSON.stringify(value)) }
 function valid(value) {

@@ -19,6 +19,7 @@
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <cstdio>
 #include <string>
 #include <cstring>
@@ -41,8 +42,9 @@ int main(int argc, char** argv) {
         struct RegistryExit {HKEY key;~RegistryExit(){RegOverridePredefKey(HKEY_CURRENT_USER,nullptr);RegCloseKey(key);}} registryExit{registry};
         return umbrella::platform::watchTaskbarAppearance(watcher.arguments()[2].toULong(),watcher.arguments()[3],watcher.arguments()[4]);
     }
+    const bool quietMulti=argc==2 && !std::strcmp(argv[1],"--placement-monitors");
     const bool quietPlacement=argc==2 && !std::strcmp(argv[1],"--placement-only");
-    const bool quietTray=quietPlacement || (argc==2 && !std::strcmp(argv[1],"--tray-only"));
+    const bool quietTray=quietMulti || quietPlacement || (argc==2 && !std::strcmp(argv[1],"--tray-only"));
     if (!quietTray && ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000)) return 2;
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) { std::fprintf(stderr, "%s\n", message.toUtf8().constData()); });
     QGuiApplication app(argc,argv);
@@ -93,6 +95,74 @@ int main(int argc, char** argv) {
         }
     } registrySandbox;
     if (!registrySandbox.active) return 4;
+    if(quietMulti) {
+        const auto snapshot=[]() {
+            QHash<QString,QVariantMap> result;QProcess probe;
+            probe.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* value){value->flags|=CREATE_NO_WINDOW;});
+            probe.start(QCoreApplication::applicationDirPath()+"/UmbrellaTaskbarHost.exe",{"--inspect-components"});
+            if(!probe.waitForFinished(4000) || probe.exitCode())return result;
+            QString device;
+            const QRegularExpression item(QStringLiteral("^  (start|clock|systemtray) .*bounds=\\(([^)]+)\\) visible=1"));
+            for(const auto& line:QString::fromUtf8(probe.readAllStandardOutput()).split('\n')) {
+                if(line.startsWith("components-monitor "))device=line.mid(19).trimmed();
+                const auto match=item.match(line);
+                if(!device.isEmpty() && match.hasMatch())result[device].insert(match.captured(1),match.captured(2));
+            }
+            return result;
+        };
+        const auto beforeAll=snapshot();if(beforeAll.size()!=2)return 77;
+        QString primaryId,secondaryId,primaryDevice,secondaryDevice;QVariantMap primaryProfile,secondaryProfile;
+        const auto profile=[](const QStringList& present,bool primary) {
+            QVariantMap value{{"version",1},{"gap",8}};QJsonArray available,left,center,right;
+            const auto catalogue=QStringLiteral("widgets start search taskview apps overflow input network volume clock desktop trayapps appoverflow power pen keyboard touchpad emoji studio microphone callmute privacy notifications eject vpn chat copilot systemtray remote").split(' ');
+            for(const auto& role:catalogue) {
+                if(!present.contains(role)){available.append(role);continue;}
+                if(role=="widgets" || (primary && (role=="start" || role=="systemtray")) || (!primary && role=="clock"))left.append(role);
+                else if(role=="apps" || (primary && (role=="search" || role=="taskview")))center.append(role);
+                else if(role!="desktop")right.append(role);
+            }
+            if(present.contains("desktop"))right.append("desktop");
+            value["available"]=available.toVariantList();value["left"]=left.toVariantList();value["center"]=center.toVariantList();value["right"]=right.toVariantList();return value;
+        };
+        {
+            TaskbarSettings model;
+            for(const auto& entry:model.layoutMonitors()) {
+                const auto monitor=entry.toMap();const auto id=monitor["id"].toString();const auto ids=model.componentIds(id);
+                if(ids.isEmpty())return 30;
+                if(monitor["primary"].toBool()){primaryId=id;primaryDevice=monitor["device"].toString();primaryProfile=profile(ids,true);}
+                else {secondaryId=id;secondaryDevice=monitor["device"].toString();secondaryProfile=profile(ids,false);}
+            }
+            if(primaryId.isEmpty() || secondaryId.isEmpty())return 77;
+            if(!model.applyComponentConfiguration(primaryId,primaryProfile) || !model.applyComponentConfiguration(secondaryId,secondaryProfile)){
+                std::fprintf(stderr,"Two-panel placement: %s\n",model.status().toUtf8().constData());return 31;
+            }
+            QTest::qWait(1300);
+            if(model.activeComponentConfigurations().size()!=2)return 32;
+            const auto moved=snapshot();
+            const auto x=[](const QVariantMap& panel,const QString& role){return panel[role].toString().section(',',0,0).toDouble();};
+            if(!moved.contains(primaryDevice) || !moved.contains(secondaryDevice) || x(moved[primaryDevice],"start")>=400 || x(moved[secondaryDevice],"clock")>=400)return 33;
+            if(primaryProfile["left"].toList().contains("systemtray") && x(moved[primaryDevice],"systemtray")>=400)return 34;
+            QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+            if(QJsonDocument::fromJson(saved.value("confirmedComponentsV2").toByteArray()).object().size()!=2)return 35;
+        }
+        QTest::qWait(1300);if(snapshot()!=beforeAll)return 36;
+        {
+            TaskbarSettings restarted;
+            if(!restarted.restoreSavedAppearance()) {std::fprintf(stderr,"Two-panel replay: %s\n",restarted.status().toUtf8().constData());return 37;}
+            QTest::qWait(1300);if(restarted.activeComponentConfigurations().size()!=2)return 38;
+            const auto moved=snapshot();
+            if(!restarted.restoreComponentConfiguration(primaryId))return 39;
+            QTest::qWait(1300);
+            if(snapshot().value(secondaryDevice)!=moved.value(secondaryDevice) || restarted.activeComponentConfigurations().size()!=1 || restarted.componentDraft(secondaryId)!=secondaryProfile)return 40;
+            QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+            const auto records=QJsonDocument::fromJson(saved.value("confirmedComponentsV2").toByteArray()).object();
+            if(records.size()!=1 || !records.contains(secondaryId))return 41;
+            if(!restarted.restoreComponentConfiguration(secondaryId))return 42;
+        }
+        QTest::qWait(1300);if(snapshot()!=beforeAll)return 43;
+        std::puts("Passed: actual two-monitor placement, detected original groups, v2 save/replay, isolated reset and original geometry restoration; registry/settings sandbox, no input.");
+        return 0;
+    }
     if(quietTray) {
         // Quiet end-to-end mode: no view, SendInput, SetFocus or flyout invocation.
         // Both preferences and Run-key writes remain inside the sandboxes above.

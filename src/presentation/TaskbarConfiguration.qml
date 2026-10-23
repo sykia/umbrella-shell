@@ -18,6 +18,7 @@ Rectangle {
     property var queuedConfiguration: null
     property string queuedMonitor: ""
     property string loadedMonitor: ""
+    property var actualIds: null
     property bool applying: false
     readonly property bool canSubmit: visible && enabled && (!Window.window || (Window.window.visible && Window.window.visibility !== Window.Minimized))
     onCanSubmitChanged: if (!canSubmit) { cancelDrag(); discardQueuedApply() }
@@ -29,15 +30,15 @@ Rectangle {
     property real pointerX: 0
     property real pointerY: 0
     property string feedback: ""
-    readonly property bool nativeAvailable: !!(system && system.componentPlacementAvailable && monitor && monitor.primary)
+    readonly property bool nativeAvailable: !!(system && system.componentPlacementAvailable && monitor)
     readonly property string applyScenario: LayoutModel.taskViewPlacement(configuration)
     readonly property color accent: "#e7131b"
     implicitHeight: body.implicitHeight + 24
     radius: 16; color: "#12ffffff"
     function currentConfiguration() {
-        var live = system && system.activeComponentMonitor === (monitor ? monitor.id : "")
-            ? LayoutModel.clone(system.activeComponentConfiguration) : null
-        return LayoutModel.valid(live) ? live : LayoutModel.defaults(monitor ? monitor.primary : true)
+        var live = system && system.activeComponentConfigurations !== undefined && monitor
+            ? system.activeComponentConfigurations[monitor.id] : system && system.activeComponentMonitor === (monitor ? monitor.id : "") ? system.activeComponentConfiguration : null
+        return LayoutModel.reconcile(live ? LayoutModel.clone(live) : null,monitor ? monitor.primary : true,actualIds)
     }
     function loadMonitor() {
         if (!monitor || loadedMonitor === monitor.id) return
@@ -46,13 +47,21 @@ Rectangle {
         // screens cancels it before the delayed apply can change another panel.
         discardQueuedApply()
         loadedMonitor = monitor.id
+        actualIds = system && typeof system.componentIds === "function" ? Array.from(system.componentIds(monitor.id,false)) : null
         configuration = currentConfiguration()
-        feedback = monitor.primary ? "" : "Перемещение на этом мониторе пока недоступно."
+        feedback = ""
     }
     Component.onCompleted: loadMonitor()
     onMonitorChanged: loadMonitor()
     function supported(next) {
-        return nativeAvailable && LayoutModel.nativeConfiguration(next)
+        return nativeAvailable && LayoutModel.nativeConfiguration(next,!!monitor.primary,actualIds)
+    }
+    function refreshComponents() {
+        if(!monitor || !system || applying)return
+        cancelDrag();discardQueuedApply()
+        actualIds=typeof system.componentIds === "function" ? Array.from(system.componentIds(monitor.id,true)) : null
+        configuration=currentConfiguration()
+        feedback=system.status || ""
     }
     function commit(next) {
         next = LayoutModel.clone(next)
@@ -163,9 +172,9 @@ Rectangle {
         required property string componentId
         property var info: LayoutModel.component(componentId)
         property bool inCatalog: false
-        readonly property bool knownHere: !!(info.seen && editor.monitor && (editor.monitor.primary || info.secondary))
+        readonly property bool knownHere: Array.isArray(editor.actualIds) ? editor.actualIds.indexOf(componentId)>=0 : !!(info.seen && editor.monitor && (editor.monitor.primary || info.secondary))
         objectName: "component_" + componentId
-        readonly property bool movable: LayoutModel.movable(componentId) && editor.nativeAvailable && !editor.applying
+        readonly property bool movable: knownHere && LayoutModel.movable(componentId) && editor.nativeAvailable && !editor.applying
         height: 52; radius:10
         color: mouse.pressed ? "#40ffffff" : mouse.containsMouse ? "#28ffffff" : "#15ffffff"
         border.width: 1; border.color: "#20ffffff"
@@ -217,6 +226,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth:true
             Label { text:"Конфигурация панели"; font.pixelSize:22; font.weight:Font.DemiBold; Layout.fillWidth:true }
+            ActionButton { text:"Обновить состав"; objectName:"configurationRefresh"; enabled:!editor.applying; onClicked:editor.refreshComponents() }
             ActionButton { text:"Восстановить"; objectName:"configurationReset"; enabled:!editor.applying && !!editor.monitor; onClicked:editor.resetLayout() }
         }
         RowLayout {

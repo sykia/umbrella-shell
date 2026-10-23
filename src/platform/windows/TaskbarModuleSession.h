@@ -3,6 +3,7 @@
 #include <QString>
 #include <QHash>
 #include <QQueue>
+#include <QStringList>
 #include <functional>
 
 namespace umbrella::platform {
@@ -12,6 +13,7 @@ public:
     ~TaskbarModuleSession();
     static bool available();
     static bool layoutAvailable();
+    static QHash<QString,QStringList> discoverComponents(QString& error);
     bool start(QString& error);
     bool apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error, const QString& monitor = {});
     bool stop(QString& error);

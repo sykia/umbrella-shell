@@ -18,6 +18,7 @@ class Backend(QObject):
         self.drafts = {}
         self.active = {}
         self.active_monitor = ""
+        self.configurations = {}
         self.apply_ok = True
         self.status_text = ""
         self.busy = False
@@ -28,6 +29,7 @@ class Backend(QObject):
     pending = Property(bool, lambda self: self.busy, notify=changed)
     activeComponentConfiguration = Property("QVariantMap", lambda self: self.active, notify=changed)
     activeComponentMonitor = Property(str, lambda self: self.active_monitor, notify=changed)
+    activeComponentConfigurations = Property("QVariantMap", lambda self: self.configurations, notify=changed)
     status = Property(str, lambda self: self.status_text, notify=changed)
     @Slot(str, "QVariantMap", result=bool)
     def applyComponentConfiguration(self, monitor, configuration):
@@ -35,6 +37,7 @@ class Backend(QObject):
         if not self.apply_ok: return False
         self.active = configuration
         self.active_monitor = monitor
+        self.configurations[monitor] = configuration
         self.drafts[monitor] = configuration
         self.changed.emit()
         return True
@@ -45,6 +48,7 @@ class Backend(QObject):
         if self.active_monitor == monitor:
             self.active = {}; self.active_monitor = ""
         self.drafts.pop(monitor, None)
+        self.configurations.pop(monitor, None)
         self.changed.emit()
         return True
     @Slot(str, result="QVariantMap")
@@ -177,10 +181,12 @@ def main():
     require(backend.calls == calls_before and backend.active == applied,
             "monitor switch applied a deferred request to the previous panel")
     root.setProperty("monitorIndex",1); QTest.qWait(100)
-    require(not root.property("nativeAvailable"),"secondary advertised native support")
-    require(not root.moveComponent("taskview","left",1),"secondary move accepted")
+    require(root.property("nativeAvailable"),"secondary native support is still blocked")
+    require(root.moveComponent("taskview","left",1),"secondary move refused")
+    QTest.qWait(240)
+    require(backend.configurations["one"]==applied and backend.configurations["two"]["left"]==["widgets","taskview"],"independent monitor configuration was overwritten")
     root.resetLayout()
-    require(backend.active == applied and backend.drafts["one"] == applied,"secondary reset affected primary")
+    require(backend.configurations["one"] == applied and backend.drafts["one"] == applied,"secondary reset affected primary")
     root.setProperty("monitorIndex",0); QTest.qWait(100)
     require(config() == applied,"switch lost confirmed primary configuration")
     backend.reset_ok = False

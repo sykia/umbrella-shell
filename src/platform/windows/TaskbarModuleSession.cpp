@@ -5,7 +5,9 @@
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QDebug>
+#include <QRegularExpression>
 #include <Windows.h>
+#include <algorithm>
 
 namespace umbrella::platform {
 namespace {
@@ -15,6 +17,36 @@ bool TaskbarModuleSession::available() {
     return QFileInfo::exists(hostPath()) && QFileInfo::exists(QCoreApplication::applicationDirPath() + "/UmbrellaTaskbarModule.dll");
 }
 bool TaskbarModuleSession::layoutAvailable() { return available() && explorer::native_layout::installedBuildSupported(); }
+QHash<QString,QStringList> TaskbarModuleSession::discoverComponents(QString& error) {
+    QHash<QString,QStringList> result;
+    if(!layoutAvailable()){error=QStringLiteral("Сборка Explorer не поддерживает обнаружение компонентов.");return result;}
+    QProcess probe;
+    probe.setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args){args->flags|=CREATE_NO_WINDOW;});
+    probe.start(hostPath(),{"--inspect-components"});
+    if(!probe.waitForFinished(3000) || probe.exitStatus()!=QProcess::NormalExit || probe.exitCode()!=0){error=QStringLiteral("Не удалось получить состав панелей Explorer.");return result;}
+    const auto output=probe.readAllStandardOutput();
+    if(output.size()>65536){error=QStringLiteral("Слишком большой снимок компонентов.");return result;}
+    QString device;
+    QHash<QString,QHash<QString,double>> positions;
+    const QRegularExpression item(QStringLiteral("^  ([a-z]+) .*bounds=\\(([-0-9.]+),([-0-9.]+),([0-9.]+),([0-9.]+)\\) visible=1 hit=1"));
+    for(const auto& line:QString::fromUtf8(output).split('\n')) {
+        if(line.startsWith("components-monitor ")){device=line.mid(19).trimmed();if(result.size()<16)result.insert(device,{});else device.clear();continue;}
+        const auto match=item.match(line);
+        if(device.isEmpty() || !match.hasMatch() || match.captured(4).toDouble()<=0 || match.captured(5).toDouble()<=0)continue;
+        auto id=match.captured(1);
+        const auto wide=id.toStdWString();
+        if(taskbar::componentFromId(wide)==taskbar::Component::Unknown)continue;
+        auto& ids=result[device];
+        const auto remember=[&](const QString& role) {
+            if(!ids.contains(role))ids.append(role);
+            const auto x=match.captured(2).toDouble();
+            if(!positions[device].contains(role) || x<positions[device][role])positions[device][role]=x;
+        };
+        if(id=="quicksettings"){remember("network");remember("volume");}else remember(id);
+    }
+    for(auto i=result.begin();i!=result.end();++i)std::stable_sort(i.value().begin(),i.value().end(),[&](const auto& a,const auto& b){return positions[i.key()][a]<positions[i.key()][b];});
+    return result;
+}
 TaskbarModuleSession::TaskbarModuleSession() {
     QObject::connect(&host_,&QProcess::started,&host_,[this]{++processEpoch_;placements_.clear();});
     QObject::connect(&host_,&QProcess::readyReadStandardOutput,&host_,[this]{readOutput();});
