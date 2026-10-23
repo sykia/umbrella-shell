@@ -42,7 +42,7 @@ try {
     $version = [regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(UmbrellaShell VERSION (\d+\.\d+\.\d+)').Groups[1].Value
     "#pragma once`n#define UMBRELLA_VERSION `"$version`"" | Set-Content -LiteralPath (Join-Path $destination 'Version.h') -Encoding utf8
     $resources = '<RCC><qresource prefix="/qt/qml/Umbrella">'
-    foreach ($file in @('Dock.qml','DockPage.qml','Settings.qml','TaskbarPage.qml','TaskbarConfiguration.qml','TaskbarLayout.js','SystemTaskbarOverlay.qml')) {
+    foreach ($file in @('Dock.qml','DockPage.qml','Settings.qml','TaskbarPage.qml','TaskbarConfiguration.qml','TaskbarLayout.js')) {
         $source = [Security.SecurityElement]::Escape((Join-Path $root "src/presentation/$file"))
         $resources += "<file alias=`"$file`">$source</file>"
     }
@@ -57,15 +57,9 @@ try {
     Invoke-Checked "$qt/bin/moc.exe" @('src/platform/windows/DockPreview.h','-I','src','-I',"$qt/include",'-I',"$qt/include/QtCore",'-o',"$destination/moc_DockPreview.cpp")
     $platform = @('src/platform/windows/DockPreview.cpp',"$destination/moc_DockPreview.cpp", 'src/platform/windows/DockWindows.cpp',"$destination/moc_DockWindows.cpp", 'src/platform/windows/WindowBackdrop.cpp','src/platform/windows/SettingsWindowControl.cpp','src/platform/windows/TaskbarRuntime.cpp','src/platform/windows/TaskbarState.cpp','src/platform/windows/TaskbarAppearance.cpp','src/platform/windows/TaskbarModuleSession.cpp')
     $model = @('src/app/TaskbarSettings.cpp',"$destination/moc_TaskbarSettings.cpp")
-    $platform += @('src/platform/windows/SettingsPageObserver.cpp','src/platform/windows/SettingsBlurIntegration.cpp')
     $libraries = @('Qt6Core.lib','Qt6Gui.lib','Qt6Quick.lib','Qt6Qml.lib','dwmapi.lib','shell32.lib','user32.lib','gdi32.lib','advapi32.lib','ole32.lib','propsys.lib','windowsapp.lib')
-    $libraries += @('oleaut32.lib','uiautomationcore.lib')
     Invoke-Checked $compiler ($common + $qtIncludes + @('/guard:cf','/I',$destination,"/Fe:$destination/UmbrellaShell.exe",'src/app/main.cpp','src/app/DockController.cpp',"$destination/moc_DockController.cpp") + $model + $platform + @("$destination/qrc_settings.cpp") + $link + $libraries + @('/guard:cf','/SUBSYSTEM:WINDOWS','/ENTRY:mainCRTStartup'))
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_policy_tests.exe",'tests/update_policy_tests.cpp') + $link)
-    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_settings_page_policy_tests.exe",'tests/settings_page_policy_tests.cpp') + $link)
-    Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_settings_page_snapshot_tests.exe",'tests/settings_page_snapshot_tests.cpp') + $link + @('Qt6Core.lib'))
-    Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_settings_page_observer_tests.exe",'tests/settings_page_observer_tests.cpp') + $link + @('Qt6Core.lib','psapi.lib'))
-    Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_settings_blur_ui_tests.exe",'tests/settings_blur_ui_tests.cpp',"$destination/qrc_settings.cpp") + $link + @('Qt6Core.lib','Qt6Gui.lib','Qt6Quick.lib','Qt6Qml.lib'))
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_dock_policy_tests.exe",'tests/dock_policy_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_dock_thumbnail_tests.exe",'tests/dock_thumbnail_tests.cpp') + $link + @('dwmapi.lib'))
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_dock_fixture_tests.exe",'tests/dock_fixture_tests.cpp','src/app/DockController.cpp',"$destination/moc_DockController.cpp") + $platform + @("$destination/qrc_settings.cpp") + $link + $libraries + @('psapi.lib'))

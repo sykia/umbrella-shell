@@ -17,11 +17,6 @@ class Model(QObject):
         self.calls = []
         self.module_available = False
         self.sides_available = False
-        self.block_system = True
-    def set_block_system(self, value):
-        self.block_system = value
-        self.changed.emit()
-    blockSystemTaskbarSettings = Property(bool, lambda self: self.block_system, set_block_system, notify=changed)
     available = Property(bool, lambda self: True, constant=True)
     widthAvailable = Property(bool, lambda self: self.module_available, notify=changed)
     sidesAvailable = Property(bool, lambda self: self.sides_available, notify=changed)
@@ -75,11 +70,6 @@ def main():
     require(page is not None, "Could not create TaskbarPage")
     wait()
     require(not model.calls, "Opening settings must not modify Windows")
-    blocker = page.findChild(QObject, "blockSystemTaskbarSettings")
-    require(blocker is not None and blocker.property("checked"), "System Settings guard must reflect saved preference")
-    blocker.setProperty("checked", False)
-    blocker.toggled.emit()
-    require(not model.block_system and not model.calls, "Opt-out must reach preference without applying taskbar changes")
 
     for value in range(40, 75):
         page.setProperty("transparency", value)

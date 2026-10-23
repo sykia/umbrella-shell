@@ -25,15 +25,10 @@ class TaskbarSettings final : public QObject {
     Q_PROPERTY(int transparency READ transparency NOTIFY changed)
     Q_PROPERTY(bool pending READ pending NOTIFY changed)
     Q_PROPERTY(QString status READ status NOTIFY changed)
-    Q_PROPERTY(bool blockSystemTaskbarSettings READ blockSystemTaskbarSettings WRITE setBlockSystemTaskbarSettings NOTIFY changed)
-    Q_PROPERTY(bool managesTaskbar READ managesTaskbar NOTIFY changed)
 public:
     explicit TaskbarSettings(QObject* parent = nullptr);
     bool restoreSavedAppearance(bool freshSession = true);
     bool savedAppearanceRestored() const { return restored_; }
-    bool managesTaskbar() const { return appearance_.active() || componentSession_.active(); }
-    bool blockSystemTaskbarSettings() const { return blockSystemTaskbarSettings_; }
-    void setBlockSystemTaskbarSettings(bool enabled);
     QVariantList appearanceMonitors() const;
     QString selectedAppearanceMonitor() const { return selectedAppearanceMonitor_; }
     Q_INVOKABLE void selectAppearanceMonitor(const QString& id);
@@ -64,7 +59,6 @@ public:
 signals:
     void changed();
 private:
-    bool blockSystemTaskbarSettings_ = true;
     QString selectedAppearanceMonitor_;
     bool restored_ = false;
     QVariantMap activeComponentConfiguration_;
