@@ -449,6 +449,23 @@ Item {
                 Layout.fillWidth:true; text:"Настройки Dock"; visible:page.panelStyle === "dock"
                 onClicked:if(page.dock) page.dock.showSettings(true)
             }
+            Caption {
+                Layout.fillWidth: true
+                text: "Блокировать системные настройки панели задач"
+                wrapMode: Text.WordWrap
+            }
+            Caption {
+                Layout.fillWidth: true
+                text: "Размывать стандартные настройки панели задач Windows, пока ими управляет Umbrella."
+                wrapMode: Text.WordWrap; opacity: 0.7; font.pixelSize: 11
+            }
+            Toggle {
+                objectName: "blockSystemTaskbarSettings"
+                checked: page.system ? page.system.blockSystemTaskbarSettings === true : false
+                enabled: !!page.system
+                Accessible.name: "Блокировать системные настройки панели задач"
+                onToggled: page.system.blockSystemTaskbarSettings = checked
+            }
             Choice {
                 text: "Вернуть исходный вид"
                 Layout.fillWidth: true

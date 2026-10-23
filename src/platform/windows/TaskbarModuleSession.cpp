@@ -6,6 +6,9 @@
 #include <Windows.h>
 
 namespace umbrella::platform {
+void TaskbarModuleSession::onStateChanged(QObject* context, std::function<void()> callback) {
+    QObject::connect(&host_, &QProcess::stateChanged, context, [callback](QProcess::ProcessState) { callback(); });
+}
 namespace {
 QString hostPath() { return QCoreApplication::applicationDirPath() + "/UmbrellaTaskbarHost.exe"; }
 }
@@ -59,6 +62,7 @@ bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness
         QString ignored; stop(ignored);
         error = QStringLiteral("Модуль Explorer не подтвердил ширину панели."); return false;
     }
+    applied_ = true;
     return true;
 }
 bool TaskbarModuleSession::positionTaskView(int x, QString& error, bool afterWidgets) {
@@ -75,9 +79,11 @@ bool TaskbarModuleSession::positionTaskView(int x, QString& error, bool afterWid
     if (host_.write(command) != command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("taskview-ok")) {
         QString ignored; stop(ignored); error = QStringLiteral("Task View: Explorer отказал (занятое место или несовместимое состояние). Запрошен откат."); return false;
     }
+    applied_ = true;
     return true;
 }
 bool TaskbarModuleSession::stop(QString& error) {
+    applied_ = false;
     if (host_.state() == QProcess::NotRunning) return true;
     host_.closeWriteChannel(); // EOF restores the subclass and original rectangle, then exits.
     if (!host_.waitForFinished(4000) || host_.exitStatus() != QProcess::NormalExit || host_.exitCode() != 0) {
@@ -107,6 +113,7 @@ bool TaskbarModuleSession::configureComponents(bool taskViewLeft,int gap,unsigne
             return false;
         }
     }
+    applied_ = true;
     return true;
 }
 bool TaskbarModuleSession::reorderTray(const QString& device,unsigned order,QString& error) {

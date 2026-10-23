@@ -211,7 +211,7 @@ struct TaskbarAppearance::Impl {
     TaskbarModuleSession module;
     QObject eventContext;
     HWINEVENTHOOK locationHook{};
-    bool detached{}, islands{}, refreshQueued{};
+    bool detached{}, islands{}, refreshQueued{}, applied{};
     inline static Impl* active{};
     void updateRegions() {
         for (auto& snapshot : snapshots) {
@@ -371,6 +371,7 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
         if (!d.locationHook) error = QStringLiteral("Не удалось включить обработку геометрии панели.");
     }
     if (!error.isEmpty()) { QString ignored; restore(ignored); return false; }
+    d.applied = true;
     return true;
 }
 bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
@@ -393,9 +394,17 @@ bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge,
     error = QStringLiteral("Monitor taskbar unavailable."); return false;
 }
 bool TaskbarAppearance::nativeSessionActive() const {return impl_->module.running();}
+bool TaskbarAppearance::active() const {
+    const auto& d = *impl_;
+    return d.applied && std::any_of(d.snapshots.begin(), d.snapshots.end(), [](const Snapshot& s) { return valid(s); });
+}
+void TaskbarAppearance::onStateChanged(QObject* context, std::function<void()> callback) {
+    impl_->module.onStateChanged(context, std::move(callback));
+}
 bool TaskbarAppearance::reorderTray(const QString& device,unsigned order,QString& error) {return impl_->module.reorderTray(device,order,error);}
 bool TaskbarAppearance::restore(QString& error) {
     auto& d = *impl_;
+    d.applied = false;
     const bool alive = std::any_of(d.snapshots.begin(), d.snapshots.end(), [](const Snapshot& value) { return valid(value); });
     if (!d.module.stop(error) && alive) return false;
     error.clear();

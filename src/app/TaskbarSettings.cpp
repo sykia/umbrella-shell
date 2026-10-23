@@ -49,6 +49,8 @@ QString monitorId(const QScreen* screen) {
 }
 
 TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
+    appearance_.onStateChanged(this, [this] { emit changed(); });
+    componentSession_.onStateChanged(this, [this] { emit changed(); });
     connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] { emit changed(); });
     connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this] { emit changed(); });
     connect(qGuiApp, &QGuiApplication::primaryScreenChanged, this, [this] { emit changed(); });
@@ -56,6 +58,7 @@ TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
     available_ = state.has_value();
     autoHide_ = state.value_or(false);
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+    blockSystemTaskbarSettings_ = settings.value("blockSystemTaskbarSettings", true).toBool();
     const auto edge = settings.value("edge", "bottom").toString();
     if (edge == "top" || edge == "bottom" || edge == "left" || edge == "right") edge_ = edge;
     detached_ = settings.value("detached", false).toBool();
@@ -265,6 +268,15 @@ void TaskbarSettings::apply(const QString& edge, bool detached, int transparency
         status_ = settings.status() == QSettings::NoError ? failure : QStringLiteral("Ошибка записи настроек; проверьте доступ к пользовательскому INI.");
         emit changed();
     }
+}
+void TaskbarSettings::setBlockSystemTaskbarSettings(bool enabled) {
+    if (enabled == blockSystemTaskbarSettings_) return;
+    // Apply opt-out immediately even if persisting the preference fails.
+    blockSystemTaskbarSettings_ = enabled;
+    QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
+    settings.setValue("blockSystemTaskbarSettings", enabled); settings.sync();
+    if (settings.status() != QSettings::NoError) status_ = QStringLiteral("Не удалось сохранить блокировку системных настроек.");
+    emit changed();
 }
 bool TaskbarSettings::widthAvailable() const { return umbrella::platform::TaskbarModuleSession::available(); }
 bool TaskbarSettings::sidesAvailable() const { return umbrella::platform::TaskbarModuleSession::layoutAvailable(); }

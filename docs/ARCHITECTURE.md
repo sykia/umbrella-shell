@@ -50,6 +50,26 @@ GUI-процессе. DockWindows изолирует WinEvent, COM, значки
 
 ## GUI и применение
 
+Settings Blur принадлежит тому же GUI-процессу. Composition root объединяет
+`TaskbarSettings::managesTaskbar()` (подтверждённые appearance/component sessions)
+с `DockController::enabled()` (успешно созданные Dock surfaces), а опция
+`blockSystemTaskbarSettings` сохраняется в существующем Taskbar INI. Чтение
+профиля, наличие процесса и запуск настроек не считаются владением панелью.
+`SettingsPageObserver` — QCoreApplication/MTA режим того же exe с UIA timeout,
+ограниченным деревом и kill-on-close Job Object; постоянного опроса нет.
+Настоящий обезличенный RU snapshot второго монитора покрыт regression-тестом.
+Точные ID контролов, общий scroll viewport, заголовок и отсутствие пересечения
+с навигацией обязательны; неизвестное дерево оставляет Settings доступным.
+
+Qt-оверлей связан с проверенным HWND через WinEvent/UIA. На исследованном Settings
+cross-process owner вернул 87, поэтому он не назначается. Окно временно topmost
+только при foreground Settings, с NOACTIVATE и проверкой WindowFromPoint; при
+уходе foreground, ошибке или отключении сразу скрывается. DWM Desktop Acrylic
+и исходный logo не меняют чужое окно. Это не встроенная страница и не запрет
+клавиатуры/accessibility API. CLI `--settings-blur-inspect` читает геометрию и
+обезличенные роли/Taskbar ID без активации. Временный desktop-fixture из рабочей
+ветки в основное приложение и установку не переносился.
+
 Settings — frameless QQuickView 1000×700, минимум 800×560, колонка до 220 px.
 Blur-behind изолирован в WindowBackdrop, при недоступности используется непрозрачный
 фон. Загрузка ждёт Loader, ресурс логотипа и первый frameSwapped. Анимация логотипа

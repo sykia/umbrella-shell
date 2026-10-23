@@ -4,6 +4,7 @@
 #include "SettingsWindowLifetime.h"
 #include "platform/windows/SettingsWindowControl.h"
 #include "platform/windows/TaskbarRuntime.h"
+#include "platform/windows/SettingsPageObserver.h"
 #include <QQmlContext>
 #include "platform/windows/WindowBackdrop.h"
 #include <QQuickItem>
@@ -32,6 +33,8 @@ int main(int argc, char* argv[]) {
         QCoreApplication::setOrganizationName("UmbrellaShell");
         QCoreApplication::setApplicationName("UmbrellaShell");
         const auto args = app.arguments();
+        if (args.size() == 2 && args[1] == "--settings-blur-observer") return umbrella::platform::runSettingsPageObserver();
+        if (args.size() == 2 && args[1] == "--settings-blur-inspect") return umbrella::platform::inspectSettingsPage();
         if (args.size() == 5 && args[1] == "--taskbar-watch") {
             bool ok = false;
             const auto parent = args[2].toULong(&ok);
@@ -77,7 +80,15 @@ int main(int argc, char* argv[]) {
     app.setWindowIcon(QIcon(":/assets/umbrella.png"));
     TaskbarSettings taskbarSettings;
     DockController dock;
+    umbrella::platform::SettingsBlurIntegration settingsBlur;
     QQuickView view;
+    const auto updateSettingsBlur = [&] {
+        settingsBlur.update(taskbarSettings.blockSystemTaskbarSettings(), taskbarSettings.managesTaskbar() || dock.enabled());
+    };
+    if (!smoke) {
+        QObject::connect(&taskbarSettings, &TaskbarSettings::changed, &view, updateSettingsBlur);
+        QObject::connect(&dock, &DockController::enabledChanged, &view, updateSettingsBlur);
+    }
     dock.attachEngine(*view.engine());
     SettingsWindowLifetime settingsLifetime(app, view, !smoke);
     view.setPersistentGraphics(false);

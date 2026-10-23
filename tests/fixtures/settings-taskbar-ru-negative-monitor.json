@@ -1,0 +1,2312 @@
+{
+  "client": [
+    -2560,
+    -8,
+    0,
+    1392
+  ],
+  "expected": [
+    -2234,
+    106,
+    0,
+    1392
+  ],
+  "nodes": [
+    {
+      "id": "",
+      "navigation": false,
+      "parent": -1,
+      "rect": [
+        -2568,
+        -8,
+        8,
+        1400
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 0,
+      "rect": [
+        -188,
+        0,
+        0,
+        32
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 0,
+      "rect": [
+        -2560,
+        0,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 0,
+      "rect": [
+        -2560,
+        32,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 1,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 1,
+      "rect": [
+        -138,
+        0,
+        -92,
+        32
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 1,
+      "rect": [
+        -92,
+        0,
+        -46,
+        32
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 1,
+      "rect": [
+        -46,
+        0,
+        0,
+        32
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 2,
+      "rect": [
+        -2510,
+        16,
+        -188,
+        32
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": true,
+      "parent": 2,
+      "rect": [
+        -1538,
+        8,
+        -1022,
+        40
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 2,
+      "rect": [
+        -2560,
+        0,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 4,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 10,
+      "rect": [
+        -2556,
+        6,
+        -2516,
+        42
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 10,
+      "rect": [
+        -2560,
+        0,
+        -2260,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 10,
+      "rect": [
+        -1630,
+        51,
+        -1184,
+        95
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 10,
+      "rect": [
+        -2234,
+        106,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 13,
+      "rect": [
+        -2555,
+        49,
+        -2265,
+        124
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 13,
+      "rect": [
+        -2560,
+        141,
+        -2260,
+        1384
+      ],
+      "scroll": true,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 13,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": true,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 14,
+      "rect": [
+        -1630,
+        51,
+        -1365,
+        95
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 14,
+      "rect": [
+        -1364,
+        54,
+        -1184,
+        92
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 15,
+      "rect": [
+        -2234,
+        106,
+        0,
+        1392
+      ],
+      "scroll": true,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 16,
+      "rect": [
+        -2544,
+        57,
+        -2484,
+        117
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 16,
+      "rect": [
+        -2472,
+        70,
+        -2327,
+        89
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 16,
+      "rect": [
+        -2472,
+        89,
+        -2327,
+        105
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 17,
+      "rect": [
+        -2544,
+        143,
+        -2264,
+        619
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 18,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 19,
+      "rect": [
+        -1629,
+        54,
+        -1406,
+        92
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 20,
+      "rect": [
+        -1364,
+        54,
+        -1184,
+        92
+      ],
+      "scroll": false,
+      "title": true,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        -1629,
+        111,
+        -629,
+        408
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        -1629,
+        411,
+        -629,
+        663
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        -1629,
+        666,
+        -629,
+        735
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        -1629,
+        738,
+        -629,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 21,
+      "rect": [
+        -12,
+        106,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        143,
+        -2264,
+        179
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        183,
+        -2264,
+        219
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        223,
+        -2264,
+        259
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        263,
+        -2264,
+        299
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        303,
+        -2264,
+        339
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        343,
+        -2264,
+        379
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        383,
+        -2264,
+        419
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        423,
+        -2264,
+        459
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        463,
+        -2264,
+        499
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        503,
+        -2264,
+        539
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        543,
+        -2264,
+        579
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 25,
+      "rect": [
+        -2544,
+        583,
+        -2264,
+        619
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1612,
+        128,
+        -1457,
+        147
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1612,
+        147,
+        -1256,
+        163
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -670,
+        130,
+        -638,
+        162
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Search_EntityItem",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1628,
+        180,
+        -630,
+        230
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_TaskView_EntityItem",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1628,
+        231,
+        -630,
+        289
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Da_EntityItem",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1628,
+        290,
+        -630,
+        348
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_XdrNotification_EntityItem",
+      "navigation": false,
+      "parent": 29,
+      "rect": [
+        -1628,
+        349,
+        -630,
+        407
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -1612,
+        428,
+        -1421,
+        447
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -1612,
+        447,
+        -1216,
+        463
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -670,
+        430,
+        -638,
+        462
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -1628,
+        480,
+        -630,
+        549
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_InkWorkspace_EntityItem",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -1628,
+        550,
+        -630,
+        608
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 30,
+      "rect": [
+        -1628,
+        609,
+        -630,
+        662
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 31,
+      "rect": [
+        -1612,
+        683,
+        -1373,
+        702
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 31,
+      "rect": [
+        -1612,
+        702,
+        -1234,
+        718
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 31,
+      "rect": [
+        -670,
+        685,
+        -638,
+        717
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1612,
+        755,
+        -1450,
+        774
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1612,
+        774,
+        -1068,
+        790
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -670,
+        757,
+        -638,
+        789
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        816,
+        -1385,
+        835
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        835,
+        -674,
+        851
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1582,
+        859,
+        -674,
+        988
+      ],
+      "scroll": true,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1007,
+        -1310,
+        1026
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1026,
+        -1290,
+        1042
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Al_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -808,
+        1005,
+        -670,
+        1045
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1068,
+        -1433,
+        1087
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_TaskbarSize_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -825,
+        1057,
+        -670,
+        1097
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_Taskbar_Autohide_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1112,
+        -1292,
+        1144
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1144,
+        -674,
+        1164
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_Taskbar_Badging_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1183,
+        -1206,
+        1215
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Flashing_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1234,
+        -1157,
+        1266
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_Taskbar_MultiMon_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1285,
+        -1264,
+        1317
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1343,
+        -1027,
+        1362
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_Taskbar_MultiMonTaskbarMode_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -840,
+        1332,
+        -670,
+        1372
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Sn_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        -1570,
+        1387,
+        -1173,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Sd_CheckBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_GroupingMode_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_SecondaryMonitorsGroupingMode_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_IconSizePreference_ComboBox",
+      "navigation": false,
+      "parent": 32,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 33,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 33,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "SystemSettings_Taskbar_NotificationsLink_ButtonEntityItem",
+      "navigation": false,
+      "parent": 33,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 34,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 34,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 35,
+      "rect": [
+        -12,
+        106,
+        0,
+        118
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 35,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 35,
+      "rect": [
+        -12,
+        921,
+        0,
+        1380
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 35,
+      "rect": [
+        -12,
+        1380,
+        0,
+        1392
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 36,
+      "rect": [
+        -2534,
+        151,
+        -2514,
+        171
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 37,
+      "rect": [
+        -2534,
+        191,
+        -2514,
+        211
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 38,
+      "rect": [
+        -2534,
+        231,
+        -2514,
+        251
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 39,
+      "rect": [
+        -2534,
+        271,
+        -2514,
+        291
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 40,
+      "rect": [
+        -2534,
+        311,
+        -2514,
+        331
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 41,
+      "rect": [
+        -2534,
+        351,
+        -2514,
+        371
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 42,
+      "rect": [
+        -2534,
+        391,
+        -2514,
+        411
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 43,
+      "rect": [
+        -2534,
+        431,
+        -2514,
+        451
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 44,
+      "rect": [
+        -2534,
+        471,
+        -2514,
+        491
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 45,
+      "rect": [
+        -2534,
+        511,
+        -2514,
+        531
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 46,
+      "rect": [
+        -2534,
+        551,
+        -2514,
+        571
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 47,
+      "rect": [
+        -2534,
+        591,
+        -2514,
+        611
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 51,
+      "rect": [
+        -1538,
+        196,
+        -1498,
+        215
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Search_ComboBox",
+      "navigation": false,
+      "parent": 51,
+      "rect": [
+        -810,
+        185,
+        -670,
+        225
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 52,
+      "rect": [
+        -1538,
+        251,
+        -1399,
+        270
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_TaskView_ToggleSwitch",
+      "navigation": false,
+      "parent": 52,
+      "rect": [
+        -760,
+        240,
+        -674,
+        280
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 53,
+      "rect": [
+        -1538,
+        310,
+        -1414,
+        329
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_Da_ToggleSwitch",
+      "navigation": false,
+      "parent": 53,
+      "rect": [
+        -760,
+        299,
+        -674,
+        339
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 54,
+      "rect": [
+        -1538,
+        361,
+        -1454,
+        380
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 54,
+      "rect": [
+        -1538,
+        380,
+        -1112,
+        396
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_XdrNotification_ToggleSwitch",
+      "navigation": false,
+      "parent": 54,
+      "rect": [
+        -760,
+        358,
+        -674,
+        398
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 58,
+      "rect": [
+        -1538,
+        489,
+        -1364,
+        508
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 58,
+      "rect": [
+        -1538,
+        508,
+        -856,
+        540
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 58,
+      "rect": [
+        -808,
+        495,
+        -670,
+        535
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 59,
+      "rect": [
+        -1538,
+        562,
+        -1464,
+        581
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 59,
+      "rect": [
+        -1538,
+        581,
+        -1225,
+        597
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "SystemSettings_DesktopTaskbar_InkWorkspace_ToggleSwitch",
+      "navigation": false,
+      "parent": 59,
+      "rect": [
+        -760,
+        559,
+        -674,
+        599
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 60,
+      "rect": [
+        -1538,
+        618,
+        -1392,
+        637
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 60,
+      "rect": [
+        -1538,
+        637,
+        -1316,
+        653
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 60,
+      "rect": [
+        -937,
+        616,
+        -670,
+        656
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 69,
+      "rect": [
+        -1574,
+        863,
+        -1458,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 69,
+      "rect": [
+        -1438,
+        867,
+        -1330,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 69,
+      "rect": [
+        -1306,
+        867,
+        -1198,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 69,
+      "rect": [
+        -1174,
+        867,
+        -1066,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 72,
+      "rect": [
+        -792,
+        1015,
+        -712,
+        1034
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 74,
+      "rect": [
+        -809,
+        1067,
+        -712,
+        1086
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 76,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 76,
+      "rect": [
+        -1553,
+        1147,
+        -1172,
+        1163
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 81,
+      "rect": [
+        -824,
+        1342,
+        -712,
+        1361
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 85,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 87,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 89,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 91,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 91,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 91,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 92,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 92,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 92,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 94,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 112,
+      "rect": [
+        -794,
+        195,
+        -712,
+        214
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 122,
+      "rect": [
+        -792,
+        505,
+        -712,
+        524
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 128,
+      "rect": [
+        -921,
+        626,
+        -712,
+        645
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 129,
+      "rect": [
+        -1570,
+        959,
+        -1462,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 130,
+      "rect": [
+        -1438,
+        959,
+        -1330,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 131,
+      "rect": [
+        -1306,
+        959,
+        -1198,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 132,
+      "rect": [
+        -1174,
+        959,
+        -1066,
+        978
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": true
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 149,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 150,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 151,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    },
+    {
+      "id": "",
+      "navigation": false,
+      "parent": 152,
+      "rect": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "scroll": false,
+      "title": false,
+      "visible": false
+    }
+  ]
+}
