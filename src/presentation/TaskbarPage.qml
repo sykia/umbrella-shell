@@ -5,20 +5,18 @@ import QtQuick.Layouts
 Item {
     id: page
     objectName: "taskbarPage"
-    property var dock: typeof dockSystem !== "undefined" ? dockSystem : null
     property string edge: system ? system.edge : "bottom"
     property bool detached: system ? (system.detached || system.islands) : false
     property real transparency: system ? system.transparency : 35
     property int thickness: system ? system.thickness : 48
     property bool islands: system ? system.islands : false
     property real widthPercent: system ? system.widthPercent : 100
-    readonly property string panelStyle: dock && dock.enabled ? "dock" : islands ? "islands" : detached ? "detached" : "attached"
+    readonly property string panelStyle: islands ? "islands" : detached ? "detached" : "attached"
     property int separateThickness: system && system.detached && !system.islands ? system.thickness : 48
     property int islandThickness: system && system.islands ? system.thickness : 72
     function selectStyle(style) {
-        if (style === "dock") { liveApply.stop(); applyQueued=false; if (dock) dock.setEnabled(true); return }
+        if (["attached","detached","islands"].indexOf(style) < 0) return
         if (style === "islands" && !widthAvailable) return
-        if (dock && dock.enabled) dock.setEnabled(false)
         if (style === panelStyle || (style === "islands" && !widthAvailable)) return
         if (panelStyle === "detached") separateThickness = thickness
         if (panelStyle === "islands") islandThickness = thickness
@@ -41,7 +39,6 @@ Item {
 
     Component.onCompleted: readyToApply = true
     function scheduleApply() {
-        if (dock && dock.enabled) return
         if (!readyToApply || !canApply || !system || !system.available) return
         applyQueued = true
         liveApply.restart()
@@ -51,7 +48,7 @@ Item {
         interval: 180
         repeat: false
         onTriggered: {
-            if ((page.dock && page.dock.enabled) || !page.applyQueued || !page.canApply || !page.system || !page.system.available) return
+            if (!page.applyQueued || !page.canApply || !page.system || !page.system.available) return
             if (page.system.pending) return
             page.applyQueued = false
             page.system.apply(page.edge, page.detached, Math.round(page.transparency),
@@ -159,7 +156,6 @@ Item {
 
             Rectangle {
                 id: desktop
-                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true
                 implicitHeight: 114
                 radius: 14; clip: true
@@ -229,7 +225,6 @@ Item {
             }
 
             Rectangle {
-                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 84
                 radius: 13; color: "#12ffffff"
                 ColumnLayout {
@@ -287,10 +282,6 @@ Item {
                             onClicked: page.selectStyle("islands")
                             Accessible.name: "Вид панели: Островки"
                         }
-                        Choice {
-                            Layout.fillWidth: true; text: "Dock"; selected: page.panelStyle === "dock"; enabled: page.dock !== null
-                            onClicked: page.selectStyle("dock")
-                        }
                     }
                 }
             }
@@ -299,7 +290,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
-                visible: implicitHeight > 0 && page.panelStyle !== "dock"
+                visible: implicitHeight > 0
                 clip: true; radius: 13; color: "#12ffffff"
                 Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
                 Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -345,7 +336,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
-                visible: implicitHeight > 0 && page.panelStyle !== "dock"
+                visible: implicitHeight > 0
                 clip: true; radius: 13; color: "#12ffffff"
                 Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
                 Behavior on opacity { NumberAnimation { duration: 180 } }
@@ -382,7 +373,6 @@ Item {
                 }
             }
             Rectangle {
-                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 83
                 radius: 13; color: "#12ffffff"
                 ColumnLayout {
@@ -421,7 +411,6 @@ Item {
                 }
             }
             Rectangle {
-                visible:page.panelStyle!=="dock"
                 Layout.fillWidth: true; implicitHeight: 64
                 radius: 13; color: "#12ffffff"
                 RowLayout {
@@ -446,17 +435,12 @@ Item {
                 }
             }
             Choice {
-                Layout.fillWidth:true; text:"Настройки Dock"; visible:page.panelStyle === "dock"
-                onClicked:if(page.dock) page.dock.showSettings(true)
-            }
-            Choice {
                 text: "Вернуть исходный вид"
                 Layout.fillWidth: true
                 enabled: page.system && !page.system.pending
                 onClicked: {
                     liveApply.stop()
                     page.applyQueued = false
-                    if (page.dock && page.dock.enabled) page.dock.setEnabled(false)
                     page.system.resetAppearance()
                 }
             }

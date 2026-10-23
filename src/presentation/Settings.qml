@@ -69,7 +69,7 @@ Rectangle {
         x: 24; y: 96
         width: root.sidebarWidth - 24; height: 40; radius: 12
         visible: root.phase === 3
-        color: !root.homeOpen ? "#e7131b" : navMouse.containsMouse ? "#28ffffff" : "#10ffffff"
+        color: !root.homeOpen && root.taskbarSection !== "dock" ? "#e7131b" : navMouse.containsMouse ? "#28ffffff" : "#10ffffff"
         scale: navMouse.pressed ? 0.98 : navMouse.containsMouse ? 1.02 : 1
         Behavior on color { ColorAnimation { duration: 180 } }
         Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -87,21 +87,21 @@ Rectangle {
             id: navMouse
             anchors.fill: parent; hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: { root.taskbarExpanded = !root.taskbarExpanded; root.homeOpen = false }
+            onClicked: { root.taskbarExpanded = !root.taskbarExpanded; if(root.taskbarSection === "dock") root.taskbarSection="settings"; root.homeOpen = false }
             Accessible.role: Accessible.Button
             Accessible.name: "Taskbar"
-            Accessible.onPressAction: { root.taskbarExpanded = !root.taskbarExpanded; root.homeOpen = false }
+            Accessible.onPressAction: { root.taskbarExpanded = !root.taskbarExpanded; if(root.taskbarSection === "dock") root.taskbarSection="settings"; root.homeOpen = false }
         }
     }
     Column {
         x:30; y:144; width:root.sidebarWidth - 36; spacing:5
-        height:root.taskbarExpanded ? 124 : 0
+        height:root.taskbarExpanded ? 81 : 0
         opacity:root.taskbarExpanded ? 1 : 0
         visible:root.phase === 3 && height > 0; clip:true
         Behavior on height { NumberAnimation { duration:180; easing.type:Easing.OutCubic } }
         Behavior on opacity { NumberAnimation { duration:160 } }
         Repeater {
-            model:[{key:"settings",label:"Основные настройки"},{key:"configuration",label:"Конфигурация панели"},{key:"dock",label:"Dock"}]
+            model:[{key:"settings",label:"Основные настройки"},{key:"configuration",label:"Конфигурация панели"}]
             Rectangle {
                 required property var modelData
                 objectName:"taskbarNavigation_" + modelData.key
@@ -116,6 +116,21 @@ Rectangle {
                     Accessible.onPressAction: { root.homeOpen=false; root.taskbarSection=modelData.key }
                 }
             }
+        }
+    }
+    Rectangle {
+        objectName: "dockNavigation"
+        x:24; y:root.taskbarExpanded ? 236 : 144
+        width:root.sidebarWidth-24; height:40; radius:12
+        visible:root.phase === 3
+        color:!root.homeOpen && root.taskbarSection === "dock" ? "#e7131b" : dockMouse.containsMouse ? "#28ffffff" : "#10ffffff"
+        Behavior on y { NumberAnimation { duration:180; easing.type:Easing.OutCubic } }
+        Text { anchors.centerIn:parent; text:"Dock"; color:"white"; font.family:"Segoe UI"; font.pixelSize:14 }
+        MouseArea {
+            id:dockMouse; anchors.fill:parent; hoverEnabled:true; cursorShape:Qt.PointingHandCursor
+            onClicked: { root.homeOpen=false; root.taskbarSection="dock"; root.taskbarExpanded=false }
+            Accessible.role:Accessible.Button; Accessible.name:"Dock"
+            Accessible.onPressAction: { root.homeOpen=false; root.taskbarSection="dock"; root.taskbarExpanded=false }
         }
     }
     ScrollView {

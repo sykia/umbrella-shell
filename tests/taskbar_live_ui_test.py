@@ -61,6 +61,8 @@ def main():
     app = QGuiApplication(["taskbar-live-ui-test", "-platform", "offscreen"])
     model = Model()
     engine = QQmlEngine()
+    dock = DockModel()
+    engine.rootContext().setContextProperty("dockSystem", dock)
     warnings = []
     engine.warnings.connect(lambda items: warnings.extend(item.toString() for item in items))
     path = Path(__file__).resolve().parents[1] / "src/presentation/TaskbarPage.qml"
@@ -169,17 +171,16 @@ def main():
     require(page.property("thickness") == 60, "Separate style retains its own height")
     for control in (attached, separate, islands):
         require(bool(control.property("selected")) == (control is separate), "Exactly one panel style must be selected")
-    dock = DockModel()
-    page.setProperty("dock", dock)
+    dock.setEnabled(True)
     previous = len(model.calls)
     page.selectStyle("dock")
     wait()
-    require(dock.active and page.property("panelStyle") == "dock" and len(model.calls) == previous,
-            "Enabling compatible Dock must preserve the native configuration")
-    page.selectStyle("detached")
+    require(dock.active and page.property("panelStyle") == "detached" and len(model.calls) == previous,
+            "Dock must not be a Taskbar style")
+    attached.clicked.emit()
     wait()
-    require(not dock.active and page.property("thickness") == 60 and len(model.calls) == previous,
-            "Disabling Dock must restore the previous mode without an unnecessary native write")
+    require(dock.active and page.property("panelStyle") == "attached" and len(model.calls) == previous + 1,
+            "Taskbar changes must work independently without disabling Dock")
     require(not warnings, "QML warnings: " + str(warnings))
     page.deleteLater()
     app.processEvents()

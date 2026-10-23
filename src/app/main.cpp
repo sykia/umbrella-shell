@@ -113,7 +113,7 @@ int main(int argc, char* argv[]) {
     view.rootObject()->setProperty("backdropAvailable", backdrop);
     if (!backdrop) QTextStream(stderr) << "System blur unavailable; using opaque fallback.\n";
     QObject::connect(&dock, &DockController::settingsRequested, &view, [&view](bool dockPage) {
-        if (dockPage && view.rootObject()) { view.rootObject()->setProperty("homeOpen", false); view.rootObject()->setProperty("taskbarExpanded", true); view.rootObject()->setProperty("taskbarSection", "dock"); }
+        if (dockPage && view.rootObject()) { view.rootObject()->setProperty("homeOpen", false); view.rootObject()->setProperty("taskbarExpanded", false); view.rootObject()->setProperty("taskbarSection", "dock"); }
         view.show(); view.raise(); view.requestActivate();
     });
     QObject::connect(&dock, &DockController::quitRequested, &app, [&app] { app.exit(0); });
