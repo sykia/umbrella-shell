@@ -66,7 +66,7 @@ try {
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_placement_tests.exe",'tests/taskbar_placement_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_snapshot_protocol_tests.exe",'tests/taskbar_snapshot_protocol_tests.cpp') + $link)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_reorder_tests.exe",'tests/taskbar_reorder_tests.cpp') + $link)
-    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_xaml_layout_tests.exe",'tests/taskbar_xaml_layout_tests.cpp') + $link + @('/MANIFEST:NO','windowsapp.lib','user32.lib','shell32.lib'))
+    Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_xaml_layout_tests.exe",'tests/taskbar_xaml_layout_tests.cpp') + $link + @('/MANIFEST:NO','windowsapp.lib','user32.lib','shell32.lib','d2d1.lib','gdi32.lib'))
     Copy-Item -LiteralPath tests/taskbar_xaml_layout_tests.manifest -Destination "$destination/umbrella_xaml_layout_tests.exe.manifest"
     Invoke-Checked $compiler ($common + $qtIncludes + @("/Fe:$destination/umbrella_session_tests.exe",'tests/taskbar_session_tests.cpp','src/platform/windows/TaskbarModuleSession.cpp') + $link + $libraries)
     Invoke-Checked $compiler ($common + @("/Fe:$destination/umbrella_menu_patch_tests.exe",'tests/taskbar_menu_patch_tests.cpp') + $link)

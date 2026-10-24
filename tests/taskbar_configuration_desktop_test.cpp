@@ -5,6 +5,8 @@
 #include <oleauto.h>
 #include "app/TaskbarSettings.h"
 #include "core/taskbar/TrayOrder.h"
+#include "platform/windows/TaskbarWindows.h"
+#include "platform/windows/TaskbarRuntime.h"
 #include <UIAutomation.h>
 #include <wrl/client.h>
 #include <QGuiApplication>
@@ -19,6 +21,7 @@
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
 #include <QJsonArray>
 #include <cstdio>
 #include <string>
@@ -43,8 +46,9 @@ int main(int argc, char** argv) {
         return umbrella::platform::watchTaskbarAppearance(watcher.arguments()[2].toULong(),watcher.arguments()[3],watcher.arguments()[4]);
     }
     const bool quietMulti=argc==2 && !std::strcmp(argv[1],"--placement-monitors");
+    const bool quietStyles=argc==2 && !std::strcmp(argv[1],"--placement-styles");
     const bool quietPlacement=argc==2 && !std::strcmp(argv[1],"--placement-only");
-    const bool quietTray=quietMulti || quietPlacement || (argc==2 && !std::strcmp(argv[1],"--tray-only"));
+    const bool quietTray=quietMulti || quietStyles || quietPlacement || (argc==2 && !std::strcmp(argv[1],"--tray-only"));
     if (!quietTray && ((GetAsyncKeyState(VK_LBUTTON)|GetAsyncKeyState(VK_RBUTTON)|GetAsyncKeyState(VK_MBUTTON)) & 0x8000)) return 2;
     qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString& message) { std::fprintf(stderr, "%s\n", message.toUtf8().constData()); });
     QGuiApplication app(argc,argv);
@@ -79,6 +83,7 @@ int main(int argc, char** argv) {
     RECT before{}; if (FAILED(button->get_CurrentBoundingRectangle(&before))) return 3;
     QTemporaryDir settingsDirectory;
     if (!settingsDirectory.isValid()) return 4;
+    const auto realProfiles=QSettings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar").value("appearanceProfilesV1").toByteArray();
     QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,settingsDirectory.path());
     // Redirect HKCU for this test process. The actual Run key is never written,
     // even while exercising auto-save and restart replay.
@@ -100,6 +105,113 @@ int main(int argc, char** argv) {
         }
     } registrySandbox;
     if (!registrySandbox.active) return 4;
+    if(quietStyles) {
+        const auto signature=[](const QString& device) {
+            QByteArray result;
+            for(const auto window:umbrella::platform::taskbarWindows()) {
+                MONITORINFOEXW monitor{};monitor.cbSize=sizeof(monitor);RECT rect{};
+                if(!GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONULL),&monitor) || device!=QString::fromWCharArray(monitor.szDevice) || !GetWindowRect(window,&rect))continue;
+                BYTE alpha=255;DWORD flags{};COLORREF key{};GetLayeredWindowAttributes(window,&key,&alpha,&flags);
+                const auto add=[&](LONG value){result+=QByteArray::number(value)+',';};
+                for(const auto value:{rect.left,rect.top,rect.right,rect.bottom,monitor.rcWork.left,monitor.rcWork.top,monitor.rcWork.right,monitor.rcWork.bottom})add(value);
+                result+=QByteArray::number(alpha)+':';
+                HRGN region=CreateRectRgn(0,0,0,0);
+                if(region) {
+                    if(GetWindowRgn(window,region)!=ERROR) {
+                        const auto size=GetRegionData(region,0,nullptr);
+                        if(size && size<=65536) {
+                            QByteArray bytes(static_cast<qsizetype>(size),0);
+                            GetRegionData(region,size,reinterpret_cast<RGNDATA*>(bytes.data()));result+=bytes.toHex();
+                        }
+                    }
+                    DeleteObject(region);
+                }
+            }
+            return result;
+        };
+        const auto monitors=umbrella::platform::TaskbarRuntime::monitors();
+        if(monitors.size()!=2)return 77;
+        QString primaryId;QVariantMap layouts;QByteArray committed;
+        {
+            TaskbarSettings model;
+            for(const auto& entry:monitors) {
+                const auto monitor=entry.toMap();const auto id=monitor["id"].toString();
+                const auto present=model.componentIds(id,true);if(present.isEmpty())return 80;
+                if(monitor["primary"].toBool())primaryId=id;
+                QVariantMap layout{{"version",1},{"gap",8}};QStringList available,left,center,right;
+                const auto catalogue=QStringLiteral("widgets start search taskview apps overflow input network volume clock desktop trayapps appoverflow power pen keyboard touchpad emoji studio microphone callmute privacy notifications eject vpn chat copilot systemtray remote").split(' ');
+                for(const auto& role:catalogue) {
+                    if(!present.contains(role)){available.append(role);continue;}
+                    if(role=="widgets" || role=="taskview")left.append(role);
+                    else if(role=="start" || role=="search" || role=="apps")center.append(role);
+                    else if(role!="desktop")right.append(role);
+                }
+                if(present.contains("desktop"))right.append("desktop");
+                layout["available"]=available;layout["left"]=left;layout["center"]=center;layout["right"]=right;
+                if(!model.applyComponentConfiguration(id,layout)){std::fprintf(stderr,"Initial styled placement: %s\n",model.status().toUtf8().constData());return 81;}
+                layouts.insert(id,layout);
+            }
+            QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+            committed=saved.value("confirmedComponentsV2").toByteArray();
+            for(int mode=0;mode<3;++mode)for(const auto& entry:monitors) {
+                const auto monitor=entry.toMap();const auto id=monitor["id"].toString();
+                QMap<QString,QByteArray> peers;
+                for(const auto& other:monitors)if(other.toMap()["id"]!=monitor["id"])
+                    peers.insert(other.toMap()["device"].toString(),signature(other.toMap()["device"].toString()));
+                model.selectAppearanceMonitor(id);
+                model.apply("bottom",mode!=0,0,false,mode?80:100,mode?64:48,mode==2);
+                QTest::qWait(550);
+                if(!model.savedAppearanceRestored() || model.activeComponentConfigurations()!=layouts ||
+                    model.detached()!=(mode!=0) || model.islands()!=(mode==2) || model.thickness()!=(mode?64:48)) {
+                    std::fprintf(stderr,"Style %d: %s\n",mode,model.status().toUtf8().constData());return 82;
+                }
+                saved.sync();
+                if(saved.value("confirmedComponentsV2").toByteArray()!=committed)return 83;
+                for(auto peer=peers.begin();peer!=peers.end();++peer)if(signature(peer.key())!=peer.value())return 84;
+                RECT moved{};if(FAILED(button->get_CurrentBoundingRectangle(&moved)))return 85;
+                for(const auto window:umbrella::platform::taskbarWindows()) {
+                    MONITORINFOEXW info{};info.cbSize=sizeof(info);RECT panel{};
+                    if(!GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONULL),&info) || !GetWindowRect(window,&panel))return 85;
+                    if(QString::fromWCharArray(info.szDevice)==monitor["device"].toString()) {
+                        const auto dpi=GetDpiForWindow(window);
+                        if(std::abs(panel.right-panel.left-MulDiv(info.rcMonitor.right-info.rcMonitor.left,mode?80:100,100))>2 ||
+                            std::abs(panel.bottom-panel.top-MulDiv(mode?64:48,static_cast<int>(dpi),96))>2)return 85;
+                    }
+                    if(!(info.dwFlags&MONITORINFOF_PRIMARY))continue;
+                    HRGN region=CreateRectRgn(0,0,0,0);
+                    const auto kind=GetWindowRgn(window,region);
+                    const bool reachable=kind==ERROR || PtInRegion(region,(moved.left+moved.right)/2-panel.left,(moved.top+moved.bottom)/2-panel.top);
+                    DeleteObject(region);if(!reachable)return 86;
+                }
+            }
+        }
+        QTest::qWait(550);
+        {
+            TaskbarSettings restarted;
+            if(!restarted.restoreSavedAppearance() || !restarted.savedAppearanceRestored())return 87;
+            QTest::qWait(550);
+            if(QJsonObject::fromVariantMap(restarted.activeComponentConfigurations())!=QJsonObject::fromVariantMap(layouts)) {
+                std::fprintf(stderr,"Restart layout: %s; actual=%s expected=%s\n",restarted.status().toUtf8().constData(),
+                    QJsonDocument(QJsonObject::fromVariantMap(restarted.activeComponentConfigurations())).toJson(QJsonDocument::Compact).constData(),
+                    QJsonDocument(QJsonObject::fromVariantMap(layouts)).toJson(QJsonDocument::Compact).constData());return 88;
+            }
+            const auto actualProfiles=QJsonDocument::fromJson(realProfiles).object();
+            if(!actualProfiles.isEmpty() && realProfiles.size()<=65536) {
+                QSettings saved(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+                saved.setValue("appearanceProfilesV1",realProfiles);saved.setValue("resumeAppearance",true);saved.sync();
+                if(!restarted.restoreSavedAppearance() || !restarted.savedAppearanceRestored()) {
+                    std::fprintf(stderr,"Real saved profile clone: %s\n",restarted.status().toUtf8().constData());return 89;
+                }
+                QTest::qWait(550);if(QJsonObject::fromVariantMap(restarted.activeComponentConfigurations())!=QJsonObject::fromVariantMap(layouts))return 90;
+                std::puts("Passed: cloned real saved appearance profiles, original settings unchanged.");
+            }
+            const auto secondary=monitors[0].toMap()["id"].toString()==primaryId?monitors[1].toMap():monitors[0].toMap();
+            const auto peer=signature(secondary["device"].toString());
+            if(!restarted.restoreComponentConfiguration(primaryId) || signature(secondary["device"].toString())!=peer)return 91;
+        }
+        std::puts("Passed: same confirmed layout across fused/detached/islands, independent peers, persisted restart and scoped reset.");
+        return 0;
+    }
     if(quietMulti) {
         const auto snapshot=[]() {
             QHash<QString,QVariantMap> result;QProcess probe;

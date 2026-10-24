@@ -63,7 +63,10 @@ public:
 signals:
     void changed();
 private:
+    friend struct TaskbarSettingsFixture;
     bool restoreSavedAppearanceImpl(bool freshSession);
+    void armStableResume();
+    bool appearanceTransaction_=false;
     quint64 resumeEpoch_ = 0;
     bool applyNativeComponents(const QString& monitor,const QVariantMap& configuration);
     bool resetNativeComponents(const QString& monitor);

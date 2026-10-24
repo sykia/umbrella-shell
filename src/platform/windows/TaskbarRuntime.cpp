@@ -184,6 +184,29 @@ bool TaskbarRuntime::setLoginResume(bool enabled) {
     else run.remove("UmbrellaShell");
     run.sync(); return run.status() == QSettings::NoError;
 }
+QStringList TaskbarRuntime::panelOwners() {
+    QStringList result,devices;
+    const auto windows=taskbarWindows();
+    if(windows.empty() || windows.size()>16)return {};
+    for(const auto window:windows) {
+        if(!explorer(window))return {};
+        DWORD pid{};if(!GetWindowThreadProcessId(window,&pid) || !pid)return {};
+        struct Process {HANDLE value;~Process(){if(value)CloseHandle(value);}} process{OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid)};
+        FILETIME created{},exited{},kernel{},user{};
+        const auto name=device(window);
+        if(!process.value || name.isEmpty() || !GetProcessTimes(process.value,&created,&exited,&kernel,&user))return {};
+        devices.append(name);
+        result.append(name+':'+QString::number(reinterpret_cast<quintptr>(window),16)+':'+QString::number(pid)+':'+
+            QString::number(created.dwHighDateTime)+':'+QString::number(created.dwLowDateTime));
+    }
+    const auto screens=monitors();if(screens.isEmpty())return {};
+    for(const auto& entry:screens) {
+        const auto monitor=entry.toMap();
+        if(!devices.contains(monitor["device"].toString()))return {};
+        result.append(monitor["id"].toString()+':'+monitor["device"].toString());
+    }
+    result.sort();return result;
+}
 QString TaskbarRuntime::reportPath() {
     return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/startup-status.json";
 }

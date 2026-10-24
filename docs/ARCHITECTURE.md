@@ -244,3 +244,19 @@ Resume компонентов и оформления имеют независ�
 
 
 Dock и Taskbar представлены независимыми пунктами навигации. TaskbarPage управляет только тремя видами системной панели и не читает/меняет enabled Dock; DockPage управляет DockController. Запрос открытия настроек от Dock выбирает отдельную страницу, без раскрытия Taskbar.
+
+## Транзакция native placement и clipping
+
+Общий owner оформления владеет placement и маской выбранной панели. Геометрия
+проверяется по HWND/root/DPI/transform; measured viewport передаётся в coordinator.
+ClipFactory готовит ограниченный снимок HRGN и composition binding до записи slots;
+accept применяет маску до hit-test, отказ откатывает обе части. Активный placement
+исключает конкурирующую UIA-запись маски. LayoutUpdated объединяется dispatcher,
+SizeChanged подтверждает оформление с deadline 2,5 с. RSDS остаётся обязательным.
+
+TaskbarAppearance::prepare захватывает журнал и общий native-owner без изменения
+оформления соседних мониторов. TaskbarSettings сохраняет профиль после native ack
+и replay, восстанавливает известный прежний профиль при отказе и сохраняет
+подтверждённый intent при native-loss. Неизвестное исходное оформление не угадывается.
+Проверенные режимы и ограничения: docs/TASKBAR_CONFIGURATION.md; crash-бюджет:
+docs/STARTUP_RECOVERY.md. Установка, VM failures и mixed-DPI desktop не подтверждены.

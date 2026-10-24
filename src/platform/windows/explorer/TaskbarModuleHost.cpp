@@ -12,10 +12,11 @@
 #include <shellapi.h>
 #include <vector>
 #include <mutex>
+#include <algorithm>
 
 namespace {
 using namespace umbrella::explorer;
-struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; bool readOnly = false; unsigned placementSerial{}; };
+struct Attachment { HWND window{}; HHOOK hook{}; RECT before{}; bool islands = false; unsigned edge = 3; bool readOnly = false; unsigned placementSerial{}; bool geometryPending=false; unsigned surfaceGeneration=0; };
 std::vector<Attachment> attachments;
 HWND owner{};
 HMODULE module{};
@@ -23,6 +24,7 @@ bool failed = false;
 HANDLE inputThread{};
 unsigned pendingWidth{}, pendingEdge{}, pendingThickness{};
 bool maskPending = false, extendedAck = false, pendingDetached = false, pendingIslands = false;
+bool profileMaskReady=false;
 constexpr UINT configureMessage = WM_APP + 19;
 HWINEVENTHOOK popupHook{};
 bool layoutActive = false;
@@ -83,7 +85,7 @@ bool isExplorer(HWND window) {
 bool send(HWND target, UINT message, WPARAM wp, LPARAM lp, DWORD_PTR& result) {
     return SendMessageTimeoutW(target, message, wp, lp, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &result) != 0;
 }
-bool configure(HWND window, unsigned width, bool enabled, unsigned edge = 3, unsigned thickness = 48, bool islandsMode = false, bool detached = false) {
+bool configure(HWND window, unsigned width, bool enabled, unsigned edge = 3, unsigned thickness = 48, bool islandsMode = false, bool detached = false, unsigned* surfaceGeneration = nullptr) {
     Configuration config;
     config.widthPercent = width;
     config.enabled = enabled;
@@ -93,7 +95,9 @@ bool configure(HWND window, unsigned width, bool enabled, unsigned edge = 3, uns
     config.detached = detached || islandsMode;
     COPYDATASTRUCT packet{protocol, sizeof(config), &config};
     DWORD_PTR result{};
-    return send(window, WM_COPYDATA, reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&packet), result) && result;
+    const bool ok=send(window, WM_COPYDATA, reinterpret_cast<WPARAM>(owner), reinterpret_cast<LPARAM>(&packet), result) && result;
+    if(ok && surfaceGeneration)*surfaceGeneration=static_cast<unsigned>(result);
+    return ok;
 }
 bool attach(HWND target) {
     if (attachments.size() == 16) return false;
@@ -129,7 +133,46 @@ void restore() {
     }
     attachments.clear();
 }
+void finishProfile(HWND window,bool succeeded) {
+    KillTimer(window,2);maskPending=false;
+    for(auto& attachment:attachments)attachment.geometryPending=false;
+    std::printf(succeeded?"applied %u %u %u %u":"error %u %u %u %u",pendingWidth,pendingEdge,pendingThickness,pendingIslands?1u:0u);
+    if(extendedAck)std::printf(" %u",pendingDetached?1u:0u);
+    if(pendingMonitor[0])std::printf(" %s",pendingMonitor);
+    std::puts("");std::fflush(stdout);
+}
+bool geometryComplete() {return std::none_of(attachments.begin(),attachments.end(),[](const auto& attachment){return attachment.geometryPending;});}
 LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp) {
+    if(message==WM_COPYDATA && maskPending) {
+        const auto* packet=reinterpret_cast<const COPYDATASTRUCT*>(lp);
+        if(packet && packet->dwData==surfaceGeometryProtocol && packet->cbData==sizeof(SurfaceGeometryReport) && packet->lpData) {
+            for(const auto& attachment:attachments)if(attachment.window==reinterpret_cast<HWND>(wp) && attachment.geometryPending) {
+                const auto& g=*static_cast<const SurfaceGeometryReport*>(packet->lpData);
+                if(g.size!=sizeof(g) || g.version!=1)return FALSE;
+                std::printf("surface-geometry status=%08lx root=%.2f,%.2f xaml=%.2f,%.2f frame=%.2f,%.2f window=%.2f,%.2f client=%.2f,%.2f dpi=%.0f scale=%.3f\n",
+                    static_cast<unsigned long>(g.status),g.rootWidth,g.rootHeight,g.xamlWidth,g.xamlHeight,g.frameWidth,g.frameHeight,
+                    g.windowWidth,g.windowHeight,g.clientWidth,g.clientHeight,g.dpi,g.rasterScale);std::fflush(stdout);return TRUE;
+            }
+            return FALSE;
+        }
+    }
+    if(message==surfaceDetailMessage) {
+        if(maskPending)for(const auto& attachment:attachments)if(attachment.window==reinterpret_cast<HWND>(wp) && attachment.geometryPending && surfaceGeneration(lp)==attachment.surfaceGeneration) {
+            std::printf("surface-detail status=%08lx\n",static_cast<unsigned long>(static_cast<HRESULT>(lp)));std::fflush(stdout);break;
+        }
+        return 0;
+    }
+    if(message==surfaceReadyMessage) {
+        if(!maskPending)return 0;
+        for(auto& attachment:attachments)if(attachment.window==reinterpret_cast<HWND>(wp) && attachment.geometryPending) {
+            if(surfaceGeneration(lp)!=attachment.surfaceGeneration)return 0;
+            attachment.geometryPending=false;
+            if(FAILED(surfaceStatus(lp)))finishProfile(window,false);
+            else if(profileMaskReady && geometryComplete())finishProfile(window,true);
+            break;
+        }
+        return 0;
+    }
     if(message==placementLostMessage) {
         for(const auto& attachment:attachments)if(attachment.window==reinterpret_cast<HWND>(lp) && attachment.placementSerial==wp) {
             MONITORINFOEXW info{};info.cbSize=sizeof(info);char device[64]{};
@@ -146,7 +189,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         if(packet && packet->dwData==placementReportProtocol) {
             if(packet->cbData!=sizeof(ComponentLayoutReport) || !packet->lpData)return FALSE;
             const auto reply=*static_cast<const ComponentLayoutReport*>(packet->lpData);
-            if(reply.size!=sizeof(reply) || reply.version!=1 || reply.bound>1 || reply.items>64 || reply.failurePhase>7)return FALSE;
+            if(reply.size!=sizeof(reply) || reply.version!=1 || reply.bound>1 || reply.items>64 || reply.failurePhase>8)return FALSE;
             placementReply=reply;placementReceived=true;return TRUE;
         }
     }
@@ -158,13 +201,14 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
             if(!GetMonitorInfoW(MonitorFromWindow(attachment.window,MONITOR_DEFAULTTONULL),&info))continue;
             WideCharToMultiByte(CP_UTF8,0,info.szDevice,-1,device,64,nullptr,nullptr);
             if(std::strcmp(device,command.device))continue;
-            if(!command.statusOnly){command.request.serial=++placementSerial;attachment.placementSerial=placementSerial;}
+            if(!command.statusOnly)command.request.serial=++placementSerial;
             nativeEditTarget=attachment.window;placementReceived=false;placementReply={};
             COPYDATASTRUCT packet{command.statusOnly?placementStatusProtocol:placementProtocol,sizeof(command.request),&command.request};DWORD_PTR accepted{};
             const bool transport=SendMessageTimeoutW(attachment.window,WM_COPYDATA,reinterpret_cast<WPARAM>(owner),reinterpret_cast<LPARAM>(&packet),SMTO_ABORTIFHUNG,3000,&accepted) && accepted && placementReceived;
             nativeEditTarget=nullptr;
             std::printf("slots-report %s status=%08lx bound=%u items=%u passes=%u phase=%u item=%u\n",device,static_cast<unsigned long>(placementReply.status),placementReply.bound,placementReply.items,placementReply.passes,placementReply.failurePhase,placementReply.failureItem);
             const bool ok=transport && (command.statusOnly || SUCCEEDED(placementReply.status));
+            if(ok && !command.statusOnly)attachment.placementSerial=command.request.count?command.request.serial:0;
             if(ok && !command.statusOnly)std::printf("slots-applied %s %u\n",device,command.request.count?command.request.serial:0);
             std::printf(ok?(command.statusOnly?"slots-status %s\n":"slots-ok %s\n"):"slots-refused %s\n",device);std::fflush(stdout);return ok;
         }
@@ -279,7 +323,10 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         extendedAck = (packed & (1u << 11)) != 0;
         pendingDetached = detached;
         pendingIslands = islandsMode;
+        pendingWidth=width;pendingEdge=edge;pendingThickness=thickness;
+        for(auto& attachment:attachments)attachment.geometryPending=false;
         bool ok = width >= 40 && width <= 100 && edge <= 3 && thickness >= 48 && thickness <= 96;
+        if(ok)for(size_t i=0;i<attachments.size();++i)if(!target || target==i+1)attachments[i].geometryPending=true;
         if (ok) for (size_t i = 0; i < attachments.size(); ++i) {
             const auto& value = attachments[i];
             if (target && target != i + 1) continue;
@@ -289,7 +336,7 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         if (ok) for (size_t i = 0; i < attachments.size(); ++i) {
             auto& value = attachments[i];
             if (target && target != i + 1) continue;
-            ok = configure(value.window, width, true, edge, thickness, islandsMode, detached) && ok;
+            ok = configure(value.window, width, true, edge, thickness, islandsMode, detached,&value.surfaceGeneration) && ok;
             if (ok) { value.islands = islandsMode; value.edge = edge; }
         }
         if (ok) {
@@ -303,9 +350,10 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
         std::vector<HWND> islandWindows;
         for (const auto& value : attachments) if (value.islands) islandWindows.push_back(value.window);
         islands::setTargets(islandWindows);
-        ok = islands::setEnabled(ok && !islandWindows.empty()) && ok;
-        if (ok && !islandWindows.empty()) {
-            pendingWidth = width; pendingEdge = edge; pendingThickness = thickness; maskPending = true;
+        // A refused monitor edit must not stop mask updates for other panels.
+        ok = islands::setEnabled(!islandWindows.empty()) && ok;
+        if (ok) {
+            profileMaskReady=islandWindows.empty();maskPending = true;
             SetTimer(window, 2, 2500, nullptr);
             return 0;
         }
@@ -320,13 +368,8 @@ LRESULT CALLBACK ownerProcedure(HWND window, UINT message, WPARAM wp, LPARAM lp)
     }
     if (message == islands::maskReady || (message == WM_TIMER && wp == 2)) {
         if (maskPending) {
-            KillTimer(window, 2); maskPending = false;
-            std::printf(message == islands::maskReady && wp ? "applied %u %u %u %u" : "error %u %u %u %u",
-                pendingWidth, pendingEdge, pendingThickness, pendingIslands ? 1u : 0u);
-            if (extendedAck) std::printf(" %u", pendingDetached ? 1u : 0u);
-            if (pendingMonitor[0]) std::printf(" %s", pendingMonitor);
-            std::puts("");
-            std::fflush(stdout);
+            if(message==WM_TIMER || !wp)finishProfile(window,false);
+            else {profileMaskReady=true;if(geometryComplete())finishProfile(window,true);}
         }
         return 0;
     }
@@ -419,6 +462,14 @@ int wmain(int argc, wchar_t** argv) {
         test = CreateWindowW(testType.lpszClassName, L"Umbrella module geometry test", WS_POPUP,
                              0, 0, GetSystemMetrics(SM_CXSCREEN), 48, nullptr, nullptr, testType.hInstance, nullptr);
         failed = !test || !attach(test);
+        if(!failed && !inspectFixture) {
+            auto& target=attachments.front();target.geometryPending=true;target.surfaceGeneration=17;
+            maskPending=true;profileMaskReady=true;
+            ownerProcedure(owner,surfaceReadyMessage,reinterpret_cast<WPARAM>(test),surfaceResult(16,S_OK));
+            ownerProcedure(owner,surfaceReadyMessage,reinterpret_cast<WPARAM>(test),surfaceResult(16,E_ABORT));
+            if(!maskPending || !target.geometryPending)failed=true;
+            maskPending=false;target.geometryPending=false;
+        }
         // Exercise nested native dispatch on our own hidden window only.
         // A diagnostic packet on every subclass frame exhausted the UI stack.
         if(!failed && !inspectFixture && SendMessageW(test,stackFixtureMessage,12,0)!=13)failed=true;

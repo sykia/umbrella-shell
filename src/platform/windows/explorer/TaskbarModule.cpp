@@ -8,6 +8,7 @@
 #include "TaskbarComponentSnapshot.h"
 #include "TaskbarTrayOrder.h"
 #include "TaskbarComponentPlacement.h"
+#include "TaskbarPlacementSurface.h"
 #include <shellapi.h>
 #include <CommCtrl.h>
 #include <array>
@@ -18,6 +19,49 @@
 namespace {
 using namespace umbrella::explorer;
 constexpr UINT_PTR subclassId = protocol;
+struct SurfaceSignal:std::enable_shared_from_this<SurfaceSignal> {
+    HWND window{},owner{};
+    umbrella::taskbar::SurfaceSpec spec;
+    winrt::Windows::UI::Xaml::FrameworkElement root{nullptr};
+    winrt::event_token resized{};
+    bool subscribed=false,queued=false,finished=false;
+    ULONGLONG started=0;HRESULT last=S_OK;unsigned generation=0;
+    ~SurfaceSignal(){stop();}
+    void stop() noexcept {
+        finished=true;
+        if(subscribed){try{root.SizeChanged(resized);}catch(...){}subscribed=false;}
+    }
+    void queue() noexcept {
+        if(finished || queued)return;
+        try {
+            queued=true;
+            root.Dispatcher().RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Low,[weak=weak_from_this()] {
+                const auto current=weak.lock();if(!current || current->finished)return;
+                current->queued=false;
+                APPBARDATA bar{};bar.cbSize=sizeof(bar);
+                const auto& policy=current->spec;
+                const bool legacy=policy.edge==0 || policy.edge==2 || (policy.edge==3 && policy.widthPercent==100 && policy.thickness==48 &&
+                    (SHAppBarMessage(ABM_GETSTATE,&bar)&ABS_AUTOHIDE));
+                SurfaceGeometryReport geometry;
+                const auto status=legacy?S_OK:component_layout::Session::surfaceStatus(current->window,policy,&geometry);
+                geometry.status=status;
+                if(SUCCEEDED(status) || GetTickCount64()-current->started>=2500) {
+                    current->stop();PostMessageW(current->owner,surfaceReadyMessage,reinterpret_cast<WPARAM>(current->window),surfaceResult(current->generation,status));
+                } else if(status!=current->last) {
+                    current->last=status;PostMessageW(current->owner,surfaceDetailMessage,reinterpret_cast<WPARAM>(current->window),surfaceResult(current->generation,status));
+                    COPYDATASTRUCT packet{surfaceGeometryProtocol,sizeof(geometry),&geometry};DWORD_PTR ignored{};
+                    SendMessageTimeoutW(current->owner,WM_COPYDATA,reinterpret_cast<WPARAM>(current->window),reinterpret_cast<LPARAM>(&packet),
+                        SMTO_ABORTIFHUNG|SMTO_BLOCK,100,&ignored);
+                }
+            });
+        }catch(...){stop();PostMessageW(owner,surfaceReadyMessage,reinterpret_cast<WPARAM>(window),surfaceResult(generation,E_ABORT));}
+    }
+    void begin() {
+        started=GetTickCount64();
+        resized=root.SizeChanged([weak=weak_from_this()](auto&&,auto&&){if(auto current=weak.lock())current->queue();});
+        subscribed=true;queue();
+    }
+};
 struct State {
     HWND window{};
     std::array<HWND, 16> popups{};
@@ -25,7 +69,6 @@ struct State {
     smooth_clip::Session smooth;
     button_edit::Session buttonEdit;
     tray_order::Session trayOrder;
-    component_layout::Session placement;
     bool detached = false;
     SIZE clipSize{};
     UINT clipDpi{};
@@ -42,6 +85,9 @@ struct State {
     HRGN originalRegion{};
     IslandMask lastMask{};
     bool maskApplied = false;
+    std::shared_ptr<SurfaceSignal> surfaceSignal;
+    unsigned surfaceGeneration=0;
+    component_layout::Session placement; // Destroy before the mask state captured by its factory.
     bool enabled = false;
     bool restoring = false;
     bool nativeLayout = false;
@@ -50,6 +96,21 @@ struct State {
     unsigned originalEdge = 3;
 };
 thread_local std::array<State*, 16> roots{};
+bool deferSurface(HWND hwnd,State* state) noexcept {
+    try {
+        wchar_t name[64]{};
+        if(GetClassNameW(hwnd,name,64) && !wcscmp(name,L"Umbrella.Taskbar.ModuleFixture.1"))return true;
+        const auto frame=context_menu::taskbarElement(hwnd);
+        if(!frame || !frame.XamlRoot())return false;
+        auto signal=std::make_shared<SurfaceSignal>();
+        signal->window=hwnd;signal->owner=state->owner;signal->generation=state->surfaceGeneration;
+        signal->spec={true,state->edge,state->width,state->thickness,state->detached || state->islands?16.:0.};
+        signal->root=frame.XamlRoot().Content().try_as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        if(!signal->root)return false;
+        state->surfaceSignal=signal;signal->begin();
+        return true;
+    }catch(...){return false;}
+}
 struct Watch {
     HWND target{};
     HANDLE owner{};
@@ -217,6 +278,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         state->visuals.suspend(); return TRUE;
     }
     if (message == RegisterWindowMessageW(restoreMessage) || message == WM_NCDESTROY) {
+        state->surfaceSignal.reset();
         const bool placementRestored=state->placement.reset();
         const bool trayRestored=state->trayOrder.reset();
         const bool buttonRestored=state->buttonEdit.reset(); // Includes owner-death recovery before DLL teardown.
@@ -257,9 +319,24 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             if(!validComponentLayout(request) || (packet->dwData==placementStatusProtocol && request.count))return FALSE;
             HRESULT status=S_OK;
             if(packet->dwData==placementProtocol) {
+                try {
                 if(!state->buttonEdit.reset() || !state->trayOrder.reset())status=E_ABORT;
-                if(SUCCEEDED(status))status=state->placement.configure(hwnd,request);
+                component_layout::ClipFactory clip;
+                if(state->islands)clip=[hwnd,state](auto boxes,double width,double height) {
+                    return placement_surface::prepare(hwnd,state->smooth,state->lastMask,state->maskApplied,boxes,width,height);
+                };
+                unsigned measuredEdge=state->edge;
+                if(!state->enabled) {
+                    MONITORINFO monitor{sizeof(monitor)};
+                    if(!GetMonitorInfoW(state->originalMonitor,&monitor))status=E_ABORT;
+                    else measuredEdge=state->original.bottom==monitor.rcMonitor.bottom?3u:
+                        state->original.top==monitor.rcMonitor.top?1u:4u;
+                }
+                const umbrella::taskbar::SurfaceSpec surface{true,measuredEdge,state->enabled?state->width:100u,state->enabled?state->thickness:48u,
+                    state->detached || state->islands?16.:0.};
+                if(SUCCEEDED(status))status=state->placement.configure(hwnd,request,{},std::move(clip),surface);
                 if(SUCCEEDED(status) && request.count)state->placement.notifyFailure(state->owner,hwnd,request.serial);
+                }catch(...){status=winrt::to_hresult();}
             }
             const auto report=state->placement.report(status);
             COPYDATASTRUCT reply{placementReportProtocol,sizeof(report),const_cast<ComponentLayoutReport*>(&report)};
@@ -312,31 +389,13 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
         if (packet && packet->dwData == islandsProtocol && packet->cbData == sizeof(IslandMask) && packet->lpData) {
             if (!state->islands) return FALSE;
             const auto& mask = *static_cast<const IslandMask*>(packet->lpData);
+            // A slot transaction owns its mask until reset. UIA snapshots may
+            // still describe the old parents and must not re-clip moved items.
+            if(state->placement.ownsClip())return TRUE;
             RECT now{};
-            if (!mask.count || mask.count > maxIslands || !GetWindowRect(hwnd, &now) ||
-                !EqualRect(&now, &mask.bounds)) return FALSE; // Reject stale layout snapshots.
-            if (state->maskApplied && !std::memcmp(&mask, &state->lastMask, sizeof(mask))) return TRUE;
-            HRGN combined = CreateRectRgn(0, 0, 0, 0);
-            if (!combined) return FALSE;
-            bool valid = true;
-            const int gap = MulDiv(2, static_cast<int>(GetDpiForWindow(hwnd)), 96);
-            std::array<RECT, maxIslands> rectangles{};
-            for (unsigned i = 0; i < mask.count; ++i) {
-                RECT r = mask.rectangles[i];
-                const int inset = (std::min)(gap, static_cast<int>((r.right - r.left) / 5));
-                InflateRect(&r, -inset, -gap);
-                if (r.left < 0 || r.top < 0 || r.right > now.right - now.left ||
-                    r.bottom > now.bottom - now.top || r.right <= r.left || r.bottom <= r.top) { valid = false; break; }
-                rectangles[i] = r;
-                HRGN part = CreateRectRgn(r.left, r.top, r.right, r.bottom);
-                if (!part) { valid = false; break; }
-                if (CombineRgn(combined, combined, part, RGN_OR) == ERROR) valid = false;
-                DeleteObject(part);
-                if (!valid) break;
-            }
-            if (!valid || !state->smooth.apply(hwnd, rectangles.data(), mask.count, 12.0f) || !SetWindowRgn(hwnd, combined, TRUE)) { DeleteObject(combined); return FALSE; }
-            state->lastMask = mask; state->maskApplied = true;
-            return TRUE;
+            if(!GetWindowRect(hwnd,&now) || !EqualRect(&now,&mask.bounds))return FALSE;
+            if(state->maskApplied && !std::memcmp(&mask,&state->lastMask,sizeof(mask)))return TRUE;
+            return placement_surface::applyPacket(hwnd,state->smooth,state->lastMask,state->maskApplied,mask)?TRUE:FALSE;
         }
         if (packet && packet->dwData == protocol && packet->cbData == sizeof(Configuration) && packet->lpData) {
             const auto config = *static_cast<const Configuration*>(packet->lpData);
@@ -402,7 +461,8 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             }
             if (!state->visuals.apply(hwnd, config.edge, config.thickness)) return FALSE;
             if (!state->islands && !updateDetachedClip(hwnd, state)) return FALSE;
-            return TRUE;
+            if(!++state->surfaceGeneration)++state->surfaceGeneration;
+            return deferSurface(hwnd,state)?state->surfaceGeneration:FALSE;
         }
         return FALSE;
     }

@@ -1,5 +1,7 @@
 // Private-process offscreen tool-window XAML island: no Explorer or global input.
 #include <Windows.h>
+#include <unknwn.h>
+#include <cstring>
 #undef GetCurrentTime
 #include "platform/windows/explorer/TaskbarLayoutSlotAdapter.h"
 #include "platform/windows/explorer/TaskbarRepeaterAccess.h"
@@ -7,6 +9,7 @@
 #include "platform/windows/explorer/TaskbarPanelOrder.h"
 #include "fixtures/AttachedLayout.h"
 #include "fixtures/ComponentLayout.h"
+#include "platform/windows/explorer/TaskbarPlacementSurface.h"
 #include "fixtures/NotifyCollectionSource.h"
 #include "core/taskbar/TrayOrder.h"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
@@ -46,6 +49,18 @@ struct ComponentLayoutFixture {
         return session.install(control);
     }
     static unsigned generation(const Session& session){return session.control_->generation;}
+    static void usePanel(Session& session,HWND panel){session.control_->panel=panel;}
+    static bool budgetPending(const Session& session){return session.control_ && session.control_->budgetResetQueued;}
+    static void settle(const Session& session) {
+        const auto deadline=GetTickCount64()+1000;
+        do {
+            MSG message{};
+            while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
+            if(!budgetPending(session))return;
+            MsgWaitForMultipleObjectsEx(0,nullptr,10,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+        }while(GetTickCount64()<deadline);
+        require(false,"Private dispatcher did not finish the pending budget callback");
+    }
     static double expectedX(const Session& session,const UIElement& element) {
         for(const auto& move:session.control_->confirmed)if(session.control_->bindings[move.instance-1].element==element)return move.after.x;
         winrt::throw_hresult(E_UNEXPECTED);
@@ -386,15 +401,99 @@ void exerciseRepeaterContract() {
     const auto expectedX=explorer::component_layout::ComponentLayoutFixture::expectedX(coordinated,attachedFirst);
     attachedFirst.RenderTransform(originalRender);
     require(std::abs(attachedFirst.TransformToVisual(commonRoot).TransformPoint({0,0}).X-expectedX)<.5,"In-flight animation was persisted as a layout-slot offset");
+    explorer::component_layout::ComponentLayoutFixture::settle(coordinated);
     Controls::Button newApp;newApp.Width(80);newApp.Height(48);
     explorer::component_layout::ComponentLayoutFixture::addRole(coordinated,newApp,taskbar::Component::Applications);
     const auto beforeModelChange=explorer::component_layout::ComponentLayoutFixture::generation(coordinated);
     data.Append(newApp);
     require(explorer::component_layout::ComponentLayoutFixture::generation(coordinated)>beforeModelChange,"Source event did not invalidate the layout cache");
     commonRoot.UpdateLayout();
-    require(Media::VisualTreeHelper::GetParent(newApp)==view && coordinated.report(S_OK).items==9,"New native application did not join the coordinated model");
+    require(Media::VisualTreeHelper::GetParent(newApp)==view && coordinated.report(S_OK).items==9 &&
+        SUCCEEDED(coordinated.report(S_OK).status),"New native application did not join the active coordinated model");
     checkLayoutIdentity();
-    require(coordinated.reset(),"Original public layout and tray slots did not restore");
+    require(coordinated.reset(),"Geometry scenario did not release its original slots");
+    // Exercise the production mask writer, with real HRGN and composition clip,
+    // on this private HWND. A failing writer mutates before reporting failure.
+    explorer::component_layout::Session surfaceCoordinated;
+    explorer::component_layout::ComponentLayoutFixture::settle(surfaceCoordinated);
+    // Measure a genuine monitor-anchored surface while this owned HWND is hidden.
+    ShowWindow(window.handle,SW_HIDE);
+    MONITORINFO surfaceMonitor{sizeof(surfaceMonitor)};
+    require(GetMonitorInfoW(MonitorFromPoint({0,0},MONITOR_DEFAULTTOPRIMARY),&surfaceMonitor)!=FALSE,"Fixture monitor unavailable");
+    const auto surfaceDpi=GetDpiForWindow(window.handle);
+    const auto surfaceWidth=MulDiv(surfaceMonitor.rcMonitor.right-surfaceMonitor.rcMonitor.left,80,100);
+    const auto surfaceHeight=MulDiv(64,static_cast<int>(surfaceDpi),96);
+    const auto surfaceX=surfaceMonitor.rcMonitor.left+(surfaceMonitor.rcMonitor.right-surfaceMonitor.rcMonitor.left-surfaceWidth)/2;
+    require(SetWindowPos(window.handle,nullptr,surfaceX,surfaceMonitor.rcMonitor.bottom-surfaceHeight,surfaceWidth,surfaceHeight,SWP_NOACTIVATE|SWP_NOZORDER)!=FALSE &&
+        SetWindowPos(child,nullptr,0,0,surfaceWidth,surfaceHeight,SWP_NOACTIVATE|SWP_NOZORDER)!=FALSE,"Mask fixture sizing failed");
+    commonRoot.Width(surfaceWidth*96./surfaceDpi);commonRoot.Height(64);
+    geometryTurn();commonRoot.UpdateLayout();
+    explorer::smooth_clip::Session surfaceSmooth;
+    require(surfaceSmooth.bind(commonRoot),"Fixture composition surface did not bind");
+    explorer::IslandMask surfaceMask{};bool surfaceApplied=false;
+    GetWindowRect(window.handle,&surfaceMask.bounds);surfaceMask.count=1;
+    surfaceMask.rectangles[0]={surfaceWidth*3/5,0,surfaceWidth,surfaceHeight};
+    require(explorer::placement_surface::applyPacket(window.handle,surfaceSmooth,surfaceMask,surfaceApplied,surfaceMask),
+        "Initial production island mask failed");
+    require(explorer::component_layout::ComponentLayoutFixture::bind(surfaceCoordinated,commonRoot,view,tray,priorLayout,customFactory,baseline,observedLayout,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},{overflow,taskbar::Component::TrayOverflow},
+         {input,taskbar::Component::InputIndicators},{quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),
+        "Independent clipping coordinator did not bind");
+    explorer::component_layout::ComponentLayoutFixture::usePanel(surfaceCoordinated,window.handle);
+    const explorer::component_layout::ClipFactory surfaceFactory=[&](auto boxes,double width,double height) {
+        return explorer::placement_surface::prepare(window.handle,surfaceSmooth,surfaceMask,surfaceApplied,boxes,width,height);
+    };
+    explorer::component_layout::ComponentLayoutFixture::settle(surfaceCoordinated);
+    const taskbar::SurfaceSpec ownedSurface{true,3,80,64,16};
+    const auto surfaceStatus=surfaceCoordinated.configure(nullptr,coordinatedRequest,{16,0,968,48},surfaceFactory,ownedSurface);
+    if(FAILED(surfaceStatus))std::cerr<<"surface status="<<std::hex<<surfaceStatus<<std::dec<<" phase="<<surfaceCoordinated.report(surfaceStatus).failurePhase
+        <<" item="<<surfaceCoordinated.report(surfaceStatus).failureItem<<" root="<<commonRoot.ActualWidth()<<','<<commonRoot.ActualHeight()<<'\n';
+    require(SUCCEEDED(surfaceStatus) && surfaceCoordinated.ownsClip(),
+        "Native placement did not update stale clipping before hit-test verification");
+    require(surfaceMask.count==3,"Contiguous controls did not produce three coherent destination islands");
+    const auto committedClip=surfaceSmooth.snapshot();
+    surfaceSmooth.reset();
+    require(surfaceSmooth.restore(committedClip) && surfaceSmooth.snapshot().clip==committedClip.clip,
+        "Composition rollback lost its previous clip after a writer reset");
+    HRGN committedRegion=CreateRectRgn(0,0,0,0),actualRegion=CreateRectRgn(0,0,0,0);
+    require(committedRegion && actualRegion && GetWindowRgn(window.handle,committedRegion)!=ERROR,"Committed input mask unavailable");
+    const auto committedMask=surfaceMask;
+    const auto committedX=explorer::component_layout::ComponentLayoutFixture::expectedX(surfaceCoordinated,attachedFirst);
+    unsigned originalClicks=0;
+    const auto clickToken=attachedFirst.Click([&](auto&&,auto&&){++originalClicks;});
+    auto movedPeer=Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(attachedFirst);
+    movedPeer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();
+    geometryTurn();require(originalClicks==1,"Clipped original control lost Click");
+    struct FailMask final:explorer::component_layout::ClipUpdate {
+        std::unique_ptr<explorer::component_layout::ClipUpdate> inner;
+        explicit FailMask(std::unique_ptr<explorer::component_layout::ClipUpdate> value):inner(std::move(value)){}
+        bool apply() noexcept override {inner->apply();return false;}
+        bool rollback() noexcept override {return inner->rollback();}
+    };
+    const explorer::component_layout::ClipFactory failingSurface=[&](auto boxes,double width,double height)->std::unique_ptr<explorer::component_layout::ClipUpdate> {
+        auto update=surfaceFactory(boxes,width,height);
+        return update?std::make_unique<FailMask>(std::move(update)):nullptr;
+    };
+    explorer::component_layout::ComponentLayoutFixture::settle(surfaceCoordinated);
+    auto rejectedRequest=coordinatedRequest;rejectedRequest.entries[0].zone=0;
+    const auto maskFailure=surfaceCoordinated.configure(nullptr,rejectedRequest,{24,0,952,48},failingSurface,ownedSurface);
+    require(FAILED(maskFailure) && surfaceCoordinated.report(maskFailure).failurePhase==7 && SUCCEEDED(surfaceCoordinated.report(S_OK).status),
+        "Partial mask failure was committed or previous slots were lost");
+    require(GetWindowRgn(window.handle,actualRegion)!=ERROR && EqualRgn(actualRegion,committedRegion) &&
+        !std::memcmp(&surfaceMask,&committedMask,sizeof(surfaceMask)),"Mask rollback did not restore committed input geometry");
+    require(std::abs(attachedFirst.TransformToVisual(commonRoot).TransformPoint({0,0}).X-committedX)<.5,
+        "Mask refusal did not restore the original component's slot");
+    movedPeer.GetPattern(Automation::Peers::PatternInterface::Invoke).as<Automation::Provider::IInvokeProvider>().Invoke();
+    geometryTurn();require(originalClicks==2,"Rollback broke the original control Click");
+    attachedFirst.Click(clickToken);DeleteObject(actualRegion);DeleteObject(committedRegion);
+    require(surfaceCoordinated.reset(),"Original public layout and tray slots did not restore");
+    require(!surfaceCoordinated.ownsClip(),"Reset retained placement mask ownership");
+    surfaceSmooth.reset();SetWindowRgn(window.handle,nullptr,TRUE);
+    SetWindowPos(window.handle,nullptr,-32000,-32000,1000,160,SWP_NOACTIVATE|SWP_NOZORDER);
+    SetWindowPos(child,nullptr,0,0,1000,160,SWP_NOACTIVATE|SWP_NOZORDER);
+    commonRoot.Width(1000);commonRoot.Height(48);commonRoot.UpdateLayout();
+    ShowWindow(window.handle,SW_SHOWNOACTIVATE);
     checkLayoutIdentity();
     require(quick.TransformToVisual(commonRoot).TransformPoint({0,0}).X>800 && overflow.TransformToVisual(commonRoot).TransformPoint({0,0}).X>800,"Tray slots remained outside their original region after reset");
     // A stale request must not replace a newer owner's source/layout in reset.

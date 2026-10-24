@@ -88,7 +88,33 @@ bool TaskbarModuleSession::waitForLine(const QByteArray& expected) {
         readOutput();
         while (!replies_.isEmpty()) {
             const auto line = replies_.dequeue();
-            if(line.startsWith("slots-report "))placementDiagnostic=line;
+            if(line.startsWith("surface-geometry "))qWarning().noquote()<<line;
+            if(line.startsWith("surface-detail ")) {
+                const auto detail=QRegularExpression(QStringLiteral("^surface-detail status=([0-9a-fA-F]{8})$")).match(QString::fromLatin1(line));
+                if(detail.hasMatch())switch(detail.captured(1).toUInt(nullptr,16)&0xffffu) {
+                case 0x301:placementFailure_=QStringLiteral("Ширина XAML не совпадает с новым размером панели.");break;
+                case 0x302:placementFailure_=QStringLiteral("Высота XAML не совпадает с новой толщиной панели.");break;
+                case 0x303:placementFailure_=QStringLiteral("Начало координат XAML не совпадает с поверхностью панели.");break;
+                case 0x304:placementFailure_=QStringLiteral("Масштаб XAML не совпадает с DPI панели.");break;
+                default:placementFailure_=QStringLiteral("Windows не подтвердила измеренную геометрию панели.");break;
+                }
+            }
+            if(line.startsWith("slots-report ")) {
+                placementDiagnostic=line;
+                const auto rollback=QRegularExpression(QStringLiteral(" status=([0-9a-fA-F]{8}) bound=([01]) ")).match(QString::fromLatin1(line));
+                if(rollback.hasMatch())placementPreserved_=rollback.captured(2)=="1" && (rollback.captured(1).toUInt(nullptr,16)&0x80000000u);
+                const auto detail=QRegularExpression(QStringLiteral(" phase=([0-9]+) item=([0-9]+)$")).match(QString::fromLatin1(line));
+                if(detail.hasMatch())switch(detail.captured(1).toUInt()) {
+                case 1:placementFailure_=detail.captured(2).toUInt()==5?
+                    QStringLiteral("Новая геометрия не вмещает раскладку без пересечений."):
+                    QStringLiteral("Измеренные компоненты не позволяют построить запрошенную раскладку.");break;
+                case 4:placementFailure_=QStringLiteral("Windows не подтвердила область нажатия исходного компонента.");break;
+                case 6:placementFailure_=QStringLiteral("Explorer повторно меняет позиции; достигнут предел безопасных попыток.");break;
+                case 7:placementFailure_=QStringLiteral("Не удалось применить или проверить общую маску панели.");break;
+                case 8:placementFailure_=QStringLiteral("Размеры, начало координат или DPI XAML не совпадают с фактической горизонтальной панелью. Боковые панели и автоскрытие не поддерживаются.");break;
+                default:break;
+                }
+            }
             if(line.startsWith("slots-refused ") && !placementDiagnostic.isEmpty())qWarning().noquote()<<placementDiagnostic;
             if (line == expected) return true;
             if (line.startsWith("error ") || line.startsWith("FAILED") || line == "taskview-refused" || line.startsWith("tray-refused ") || line.startsWith("slots-refused ")) return false;
@@ -114,6 +140,7 @@ bool TaskbarModuleSession::start(QString& error) {
     return false;
 }
 bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error, const QString& monitor) {
+    placementFailure_.clear();
     if (percent < 40 || percent > 100 || thickness < 48 || thickness > 96) { error = QStringLiteral("Недопустимая ширина панели."); return false; }
     const int location = edge == "left" ? 0 : edge == "top" ? 1 : edge == "right" ? 2 : edge == "bottom" ? 3 : -1;
     if (location < 0) { error = QStringLiteral("Недопустимое расположение панели."); return false; }
@@ -126,8 +153,7 @@ bool TaskbarModuleSession::apply(int percent, const QString& edge, int thickness
         value += ' ' + monitor.toLatin1();
     }
     if (host_.write(value + '\n') != value.size() + 1 || !host_.waitForBytesWritten(3000) || !waitForLine("applied " + value)) {
-        QString ignored; stop(ignored);
-        error = QStringLiteral("Модуль Explorer не подтвердил ширину панели."); return false;
+        error = placementFailure_.isEmpty()?QStringLiteral("Модуль Explorer не подтвердил геометрию выбранной панели; требуется откат её параметров."):placementFailure_; return false;
     }
     return true;
 }
@@ -194,6 +220,8 @@ bool TaskbarModuleSession::reorderTray(const QString& device,unsigned order,QStr
     return true;
 }
 bool TaskbarModuleSession::placeComponents(const QByteArray& command,const QString& device,QString& error) {
+    placementFailure_.clear();
+    placementPreserved_=false;
     explorer::PlacementCommand parsed;
     if(!explorer::parsePlacementCommand(std::string_view(command.constData(),static_cast<size_t>(command.size())),parsed) ||
         parsed.statusOnly || QString::fromLatin1(parsed.device)!=device || !layoutAvailable()) {
@@ -209,7 +237,7 @@ bool TaskbarModuleSession::placeComponents(const QByteArray& command,const QStri
         }
     }
     if(host_.write(command)!=command.size() || !host_.waitForBytesWritten(3000) || !waitForLine("slots-ok "+device.toLatin1())) {
-        error=QStringLiteral("Windows отказала в переносе. Новый порядок не сохранён.");return false;
+        error=placementFailure_.isEmpty()?QStringLiteral("Windows отказала в переносе. Новый порядок не сохранён."):placementFailure_;return false;
     }
     return true;
 }

@@ -8,6 +8,22 @@
 namespace umbrella::explorer {
 inline constexpr ULONG_PTR placementProtocol=protocol+8,placementReportProtocol=protocol+9,placementStatusProtocol=protocol+10;
 inline constexpr UINT placementLostMessage=WM_APP+24;
+inline constexpr UINT surfaceReadyMessage=WM_APP+25;
+inline constexpr UINT surfaceDetailMessage=WM_APP+26;
+// Target is Windows x64. A late completion from a timed-out request must never
+// acknowledge a newer appearance for the same HWND.
+inline LPARAM surfaceResult(unsigned generation,HRESULT status) noexcept {
+    return static_cast<LPARAM>((static_cast<std::uint64_t>(generation)<<32)|static_cast<std::uint32_t>(status));
+}
+inline unsigned surfaceGeneration(LPARAM value) noexcept {return static_cast<unsigned>(static_cast<std::uint64_t>(value)>>32);}
+inline HRESULT surfaceStatus(LPARAM value) noexcept {return static_cast<HRESULT>(static_cast<std::uint32_t>(value));}
+inline constexpr ULONG_PTR surfaceGeometryProtocol=protocol+11;
+struct SurfaceGeometryReport {
+    std::uint32_t size=sizeof(SurfaceGeometryReport),version=1;
+    HRESULT status=E_PENDING;
+    double rootWidth{},rootHeight{},xamlWidth{},xamlHeight{},frameWidth{},frameHeight{},windowWidth{},windowHeight{},
+        clientWidth{},clientHeight{},dpi{},rasterScale{};
+};
 inline constexpr unsigned maxLayoutGroups=32;
 struct ComponentLayoutAssignment {wchar_t id[24]{};std::uint32_t zone{};};
 struct ComponentLayoutRequest {

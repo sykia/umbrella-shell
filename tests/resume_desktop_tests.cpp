@@ -135,6 +135,15 @@ int main(int argc, char** argv) {
         reloaded.restoreSavedAppearance();
         if (!waitFor([&]{return verify(monitors,false,true);})) { QTextStream(stdout)<<reloaded.status()<<'\n'<<QJsonDocument(snapshot()).toJson(); return 20; }
         report["independentEdgesRestored"]=snapshot();
+        if (reloaded.sidesAvailable()) {
+            const auto beforeMixed=snapshot();
+            saved.sync(); const auto beforeProfiles=saved.value("appearanceProfilesV1").toByteArray();
+            reloaded.apply("left",false,40,false,100,48,false);
+            saved.sync();
+            if (snapshot()!=beforeMixed || saved.value("appearanceProfilesV1").toByteArray()!=beforeProfiles) return 21;
+            if (!reloaded.status().contains(QStringLiteral("Независимые боковые"))) return 22;
+            report["mixedSideRefusedWithoutMovingPeers"]=true;
+        }
         reloaded.resetAppearance();
         saved.sync(); if(saved.value("resumeAppearance",true).toBool()) return 10;
     }

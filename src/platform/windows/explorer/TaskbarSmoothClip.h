@@ -46,6 +46,31 @@ class Session {
     winrt::Windows::UI::Composition::CompositionClip original_{nullptr};
     winrt::Windows::UI::Composition::CompositionBorderMode border_{};
 public:
+    struct Snapshot {
+        winrt::Windows::UI::Composition::Visual visual{nullptr};
+        winrt::Windows::UI::Composition::CompositionClip clip{nullptr};
+        winrt::Windows::UI::Composition::CompositionClip original{nullptr};
+        winrt::Windows::UI::Composition::CompositionBorderMode border{};
+        winrt::Windows::UI::Composition::CompositionBorderMode originalBorder{};
+        bool bound=false;
+    };
+    bool bind(const winrt::Windows::UI::Xaml::UIElement& root) noexcept {
+        if(visual_)return true;
+        try {
+            if(!root || !root.XamlRoot())return false;
+            visual_=winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(root);
+            original_=visual_.Clip();border_=visual_.BorderMode();return true;
+        }catch(...){reset();return false;}
+    }
+    Snapshot snapshot() const { return visual_?Snapshot{visual_,visual_.Clip(),original_,visual_.BorderMode(),border_,true}:Snapshot{}; }
+    bool restore(const Snapshot& value) noexcept {
+        try {
+            if(!value.bound){reset();return true;}
+            visual_=value.visual;original_=value.original;border_=value.originalBorder;
+            if(!visual_)return false;
+            visual_.Clip(value.clip);visual_.BorderMode(value.border);return true;
+        }catch(...){return false;}
+    }
     ~Session() { reset(); }
     Session() = default;
     Session(const Session&) = delete;
@@ -64,8 +89,7 @@ public:
             if (!visual_) {
                 const auto frame = context_menu::taskbarElement(hwnd);
                 if (!frame || !frame.XamlRoot()) return false;
-                visual_ = winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(frame.XamlRoot().Content());
-                original_ = visual_.Clip(); border_ = visual_.BorderMode();
+                if(!bind(frame.XamlRoot().Content()))return false;
             }
             const float dpi = static_cast<float>(GetDpiForWindow(hwnd));
             if (dpi <= 0) return false;

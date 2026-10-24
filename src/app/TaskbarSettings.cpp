@@ -5,6 +5,8 @@
 #include "platform/windows/TaskbarModuleSession.h"
 #include "platform/windows/TaskbarRuntime.h"
 #include <QTimer>
+#include <QScopedValueRollback>
+#include <QEventLoop>
 #include <QSettings>
 #include <QGuiApplication>
 #include <QScreen>
@@ -69,30 +71,21 @@ QString monitorId(const QScreen* screen) {
     return {}; // No persistent identity: do not guess another monitor's profile.
 }
 QStringList resumeOwners() {
-    QStringList result;
-    for (const auto& entry : umbrella::platform::TaskbarRuntime::monitors()) {
-        const auto monitor = entry.toMap();
-        const auto id = monitor["id"].toString();
-        const auto pid = monitor["explorerPid"].toLongLong();
-        if (id.isEmpty() || pid <= 0) return {};
-        result.append(id + ':' + QString::number(pid));
-    }
-    result.sort();
-    return result;
+    return umbrella::platform::TaskbarRuntime::panelOwners();
 }
 }
 
 TaskbarSettings::TaskbarSettings(QObject* parent) : QObject(parent) {
     const auto componentLost=[this](const QString& device) {
+        if(appearanceTransaction_)return; // The transaction verifies its own replay/rollback.
         QString target;
         for(const auto& entry:layoutMonitors())if(entry.toMap()["device"].toString()==device)target=entry.toMap()["id"].toString();
         if(!activeComponents_.contains(target))return;
         ++resumeEpoch_; // Loss must not let an older stability timer replenish replay.
-        activeComponents_.remove(target);confirmedComponents_.remove(target);
+        activeComponents_.remove(target);restored_=false;
         appearanceComponents_.remove(target);legacyTrayComponents_.remove(target);componentCatalogue_.remove(device);
         if(activeComponentMonitor_==target){activeComponentConfiguration_.clear();activeComponentMonitor_.clear();}
-        persistConfirmedComponents();
-        status_=QStringLiteral("Explorer восстановил штатные позиции после изменения раскладки. Повторное применение отключено.");emit changed();
+        status_=QStringLiteral("Explorer восстановил штатные позиции. Подтверждённый порядок сохранён; автоматический повтор в этом сеансе отключён.");emit changed();
     };
     componentSession_.componentLost=componentLost;appearance_.setComponentLossHandler(componentLost);
     connect(qGuiApp, &QGuiApplication::screenAdded, this, [this] { componentCatalogue_.clear();emit changed(); });
@@ -125,7 +118,7 @@ QVariantList TaskbarSettings::appearanceMonitors() const { return umbrella::plat
 void TaskbarSettings::selectAppearanceMonitor(const QString& id) {
     bool found = false;
     for (const auto& entry : appearanceMonitors()) if (entry.toMap()["id"].toString() == id) found = true;
-    if (!found || pending_) return;
+    if (!found || pending_ || appearanceTransaction_) return;
     selectedAppearanceMonitor_ = id;
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     const auto profiles = appearanceProfiles(settings);
@@ -139,9 +132,9 @@ void TaskbarSettings::selectAppearanceMonitor(const QString& id) {
     emit changed();
 }
 bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
-    if (pending_) { QTimer::singleShot(300, this, [this, freshSession] { restoreSavedAppearance(freshSession); }); return true; }
+    if (pending_ || appearanceTransaction_) { QTimer::singleShot(300, this, [this, freshSession] { restoreSavedAppearance(freshSession); }); return true; }
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
-    const auto epoch = ++resumeEpoch_;
+    ++resumeEpoch_;
     const bool appearanceRequested = settings.value("resumeAppearance", settings.contains("edge")).toBool();
     const bool requested = appearanceRequested || settings.value("resumeComponents", appearanceRequested && !confirmedComponents_.isEmpty()).toBool();
     if (freshSession && requested) {
@@ -164,7 +157,11 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
         }
     }
     const bool result = restoreSavedAppearanceImpl(freshSession);
-    if (result && restored_) {
+    if (result && restored_)armStableResume();
+    return result;
+}
+void TaskbarSettings::armStableResume() {
+        const auto epoch=++resumeEpoch_;
         const auto owners = resumeOwners();
         // A native ack alone does not prove Explorer survived. A new generation
         // invalidates this single-shot callback before another replay can start.
@@ -174,8 +171,6 @@ bool TaskbarSettings::restoreSavedAppearance(bool freshSession) {
             stable.setValue("recovery/unsettledAttempts", 0);
             stable.sync(); // Failure leaves the conservative persisted budget.
         });
-    }
-    return result;
 }
 bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
@@ -217,6 +212,18 @@ bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
         if(!confirmed.isEmpty())return replayConfirmedComponents();
         status_ = QStringLiteral("Сохранённые параметры сейчас несовместимы; файл настроек не изменён."); emit changed(); return true;
     }
+    // The current native adapter broadcasts vertical orientation. Refuse a
+    // mixed orientation before touching Windows instead of moving another panel
+    // or silently discarding the selected monitor's request.
+    const auto vertical = [](const QString& edge) { return edge == "left" || edge == "right"; };
+    const auto baselineEdge = targets.front().value["edge"].toString();
+    for (const auto& target : targets) {
+        const auto edge = target.value["edge"].toString();
+        if (edge != baselineEdge && (vertical(edge) || vertical(baselineEdge))) {
+            status_ = QStringLiteral("Независимые боковые стороны экранов пока не поддерживаются нативным модулем. Изменение отменено, другие экраны не перемещены.");
+            emit changed(); return false;
+        }
+    }
     std::stable_sort(targets.begin(), targets.end(), [](const Target& a, const Target& b) { return a.primary && !b.primary; });
     bool autoHide = settings.value("autoHide", autoHide_).toBool();
     for (const auto& target : targets) {
@@ -233,11 +240,6 @@ bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
     for (const auto& target : targets) {
         if (!ok) break;
         auto value = target.value;
-        const auto edge = value["edge"].toString();
-        const auto baseEdge = first["edge"].toString();
-        if (edge != baseEdge && (edge == "left" || edge == "right" || baseEdge == "left" || baseEdge == "right")) {
-            value["edge"] = baseEdge; skipped.append(QStringLiteral("разные боковые стороны"));
-        }
         ok = appearance_.applyMonitor(target.device, value["edge"].toString(), value["detached"].toVariant().toBool(), value["transparency"].toVariant().toInt(),
             value["widthPercent"].toVariant().toInt(), value["thickness"].toVariant().toInt(), value["islands"].toVariant().toBool(), error);
     }
@@ -250,12 +252,14 @@ bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
     applyAutoHide(autoHide);
     if (!skipped.isEmpty()) status_ = QStringLiteral("Пропущены несовместимые параметры: ") + skipped.join(", ") + QStringLiteral(". Выбор сохранён.");
     if (!setResumeAtLogin(true)) status_ = QStringLiteral("Оформление восстановлено, но записать автозапуск не удалось.");
-    if(!confirmed.isEmpty() && !replayConfirmedComponents())return false;
+    if(!confirmed.isEmpty() && !replayConfirmedComponents()) {
+        restored_=false;emit changed();return true; // Report partial restore without replaying a refused operation.
+    }
     emit changed();
     return true;
 }
 void TaskbarSettings::applyAutoHide(bool enabled) {
-    if (pending_) return;
+    if (pending_ || appearanceTransaction_) return;
     const auto current = umbrella::platform::taskbarAutoHide();
     if (current && *current == enabled) {
         available_ = true;
@@ -288,7 +292,7 @@ void TaskbarSettings::applyAutoHide(bool enabled) {
 }
 
 void TaskbarSettings::apply(const QString& edge, bool detached, int transparency, bool autoHide, int widthPercent, int thickness, bool islands) {
-    if (pending_) return;
+    if (pending_ || appearanceTransaction_) return;
     if (islands) detached = true;
     if (!detached) thickness = 48;
     if (thickness < (islands ? 64 : 48) || thickness > 96 || (islands && !widthAvailable())) {
@@ -313,59 +317,135 @@ void TaskbarSettings::apply(const QString& edge, bool detached, int transparency
     }
     if (edge != "bottom" && edge != "top" && edge != "left" && edge != "right") return;
     if (transparency < 0 || transparency > 100) return;
-    // Until placement and masks share a verified geometry contract, refuse only
-    // this monitor's incompatible appearance edit before resetting any session.
     if (confirmedComponents_.contains(selectedAppearanceMonitor_) &&
-        (edge != "bottom" || (detached && widthPercent != 100) || thickness != 48 || islands || autoHide)) {
-        status_ = QStringLiteral("Изменение оформления отменено: сохранённый перенос этого экрана требует нижней панели 100%, 48 DIP без островков и автоскрытия. Совместное размещение и clipping новой геометрии ещё не проверены. Предыдущая конфигурация сохранена.");
+        ((edge != "bottom" && edge != "top") || autoHide)) {
+        status_ = QStringLiteral("Сохранённый перенос поддерживает горизонтальную панель без автоскрытия. Предыдущая конфигурация сохранена.");
         emit changed(); return;
     }
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     const QStringList keys{"appearanceProfilesV1", "edge", "detached", "transparency", "widthPercent", "thickness", "islands", "autoHide", "resumeAppearance", "resumeComponents", "confirmedComponentV1", "confirmedComponentsV2"};
-    QVariantMap previous;
-    for (const auto& key : keys) if (settings.contains(key)) previous.insert(key, settings.value(key));
-    const auto componentRecords=confirmedComponents_;
-    if (!resetComponentLayout()) return;
-    confirmedComponents_=componentRecords;
-    if(!persistConfirmedComponents()){status_=QStringLiteral("Не удалось сохранить порядок перед изменением оформления.");emit changed();return;}
-    edge_ = edge; detached_ = detached; transparency_ = transparency; widthPercent_ = widthPercent; thickness_ = thickness; islands_ = islands;
-    auto profiles = appearanceProfiles(settings);
-    const auto old = legacyAppearance(settings);
-    const auto monitors = appearanceMonitors();
-    if (selectedAppearanceMonitor_.isEmpty()) { status_ = QStringLiteral("Монитор недоступен."); emit changed(); return; }
-    for (const auto& entry : monitors) {
-        const auto monitor = entry.toMap(); const auto id = monitor["id"].toString();
-        if (!profiles.contains(id) && profiles.size() < 16 && validAppearance(old)) profiles[id] = old;
-    }
-    if (!profiles.contains(selectedAppearanceMonitor_) && profiles.size() >= 16) return;
-    const QJsonObject value{{"edge", edge_}, {"detached", detached_}, {"transparency", transparency_},
-        {"widthPercent", widthPercent_}, {"thickness", thickness_}, {"islands", islands_}};
-    profiles[selectedAppearanceMonitor_] = value;
-    settings.setValue("appearanceProfilesV1", QJsonDocument(profiles).toJson(QJsonDocument::Compact));
-    // Keep the legacy fallback tied to the primary panel, never the last edited secondary.
-    for (const auto& entry : monitors) if (entry.toMap()["primary"].toBool() && entry.toMap()["id"].toString() == selectedAppearanceMonitor_)
-        for (auto it = value.begin(); it != value.end(); ++it) settings.setValue(it.key(), it.value().toVariant());
-    settings.setValue("autoHide", autoHide);
-    settings.setValue("resumeAppearance", true);
-    settings.sync();
-    const bool saved = settings.status() == QSettings::NoError;
-    const bool applied = saved && restoreSavedAppearance(false);
-    if (!applied) {
-        const auto failure = saved ? status_ : QStringLiteral("Не удалось сохранить настройки; изменение отменено.");
-        for (const auto& key : keys) {
-            if (previous.contains(key)) settings.setValue(key, previous[key]); else settings.remove(key);
+    const auto currentProfiles = appearanceProfiles(settings);
+    const auto fallbackProfile = legacyAppearance(settings);
+    for (const auto& entry : appearanceMonitors()) {
+        const auto id = entry.toMap()["id"].toString();
+        if (id == selectedAppearanceMonitor_) continue;
+        const auto profile = currentProfiles.contains(id) ? currentProfiles[id].toObject() : fallbackProfile;
+        if (!validAppearance(profile)) continue;
+        const auto otherEdge = profile["edge"].toString();
+        if (edge != otherEdge && (edge == "left" || edge == "right" || otherEdge == "left" || otherEdge == "right")) {
+            status_ = QStringLiteral("Независимые боковые стороны экранов пока не поддерживаются нативным модулем. Изменение отменено, другие экраны не перемещены.");
+            emit changed(); return;
         }
-        settings.sync();
-        selectAppearanceMonitor(selectedAppearanceMonitor_);
-        confirmedComponents_=readConfirmedComponents(settings);
-        status_ = settings.status() == QSettings::NoError ? failure : QStringLiteral("Ошибка записи настроек; проверьте доступ к пользовательскому INI.");
-        emit changed();
     }
+    const auto target=selectedAppearanceMonitor_;
+    QString device;bool primary=false;
+    for(const auto& entry:appearanceMonitors())if(entry.toMap()["id"].toString()==target) {
+        device=entry.toMap()["device"].toString();primary=entry.toMap()["primary"].toBool();
+    }
+    auto profiles=currentProfiles;
+    if(device.isEmpty() || (!profiles.contains(target) && profiles.size()>=16)) {
+        status_=QStringLiteral("Монитор недоступен или превышен предел сохранённых профилей.");emit changed();return;
+    }
+    const auto oldHide=umbrella::platform::taskbarAutoHide();
+    if(!oldHide){status_=QStringLiteral("Не удалось прочитать состояние панели до изменения.");emit changed();return;}
+    if(autoHide && !activeComponents_.isEmpty()) {
+        status_=QStringLiteral("Автоскрытие пока несовместимо с активным переносом компонентов.");emit changed();return;
+    }
+    QVariantMap previous;
+    for(const auto& key:keys)if(settings.contains(key))previous.insert(key,settings.value(key));
+    const auto oldActive=activeComponents_;
+    auto layouts=oldActive;
+    const bool resumeComponents=settings.value("resumeComponents",settings.value("resumeAppearance",settings.contains("edge")).toBool() && !confirmedComponents_.isEmpty()).toBool();
+    if(resumeComponents && confirmedComponents_.contains(target))layouts.insert(target,confirmedComponents_[target]);
+    const bool hadAppearance=appearance_.nativeSessionActive();
+    const bool migrating=!hadAppearance && componentSession_.running();
+    QScopedValueRollback<bool> transaction(appearanceTransaction_,true);
+    QString error;bool styleTouched=false,hideTouched=false;
+    std::optional<umbrella::platform::TaskbarProfile> priorProfile;
+    const auto changeHide=[&](bool requested) {
+        if(!umbrella::platform::requestTaskbarAutoHide(requested))return false;
+        pending_=true;
+        QEventLoop wait;QTimer::singleShot(250,&wait,&QEventLoop::quit);wait.exec();pending_=false;
+        const auto measured=umbrella::platform::taskbarAutoHide();
+        return measured && *measured==requested;
+    };
+    const auto replay=[&](const QVariantMap& requested) {
+        bool ok=true;
+        for(auto i=requested.begin();i!=requested.end();++i) {
+            if(applyNativeComponents(i.key(),i.value().toMap()))activeComponents_.insert(i.key(),i.value());
+            else {activeComponents_.remove(i.key());ok=false;}
+        }
+        return ok;
+    };
+    const auto restore=[&] {
+        bool ok=true;QString rollback;
+        if(!hadAppearance) {
+            ok=appearance_.restore(rollback);
+            activeComponents_.clear();appearanceComponents_.clear();legacyTrayComponents_.clear();
+            if(ok)ok=replay(oldActive);
+        } else {
+            if(styleTouched && priorProfile) {
+                const auto& p=*priorProfile;
+                if(!appearance_.placeComponents("slots "+device.toLatin1()+" reset\n",device,rollback))ok=false;
+                if(!appearance_.applyMonitor(device,p.edge,p.detached,p.transparency,p.widthPercent,p.thickness,p.islands,rollback))ok=false;
+            }
+            if(oldActive.contains(target)) {
+                if(!replay(QVariantMap{{target,oldActive[target]}}))ok=false;
+            } else activeComponents_.remove(target);
+        }
+        if(hideTouched && !changeHide(*oldHide))ok=false;
+        if(activeComponentMonitor_==target) {
+            activeComponentConfiguration_=activeComponents_.value(target).toMap();
+            if(activeComponentConfiguration_.isEmpty())activeComponentMonitor_.clear();
+        }
+        return ok;
+    };
+    const auto refuse=[&](const QString& reason) {
+        const bool restored=restore();
+        status_=restored?reason+QStringLiteral(" Предыдущая конфигурация восстановлена."):
+            reason+QStringLiteral(" Откат не подтверждён; повторное применение не запускается.");
+        emit changed();
+    };
+    if(migrating) {
+        if(!componentSession_.stop(error)){status_=error;emit changed();return;}
+        activeComponents_.clear();appearanceComponents_.clear();legacyTrayComponents_.clear();
+    }
+    if(!appearance_.prepare(error)){refuse(error);return;}
+    priorProfile=appearance_.monitorProfile(device);
+    if(!priorProfile) {refuse(QStringLiteral("Исходное оформление выбранной панели нельзя точно представить для отката."));return;}
+    if(hadAppearance && oldActive.contains(target) && !resetNativeComponents(target)){refuse(status_);return;}
+    if(*oldHide!=autoHide) {
+        hideTouched=true;
+        if(!changeHide(autoHide)){refuse(QStringLiteral("Windows не подтвердила автоскрытие."));return;}
+    }
+    styleTouched=true;
+    if(!appearance_.applyMonitor(device,edge,detached,transparency,widthPercent,thickness,islands,error)){refuse(error);return;}
+    QVariantMap toReplay;
+    if(migrating)toReplay=layouts;
+    else if(layouts.contains(target))toReplay.insert(target,layouts[target]);
+    if(!replay(toReplay)){refuse(status_.isEmpty()?QStringLiteral("Новая геометрия не вмещает подтверждённый перенос."):status_);return;}
+    const QJsonObject value{{"edge",edge},{"detached",detached},{"transparency",transparency},
+        {"widthPercent",widthPercent},{"thickness",thickness},{"islands",islands}};
+    profiles[target]=value;
+    settings.setValue("appearanceProfilesV1",QJsonDocument(profiles).toJson(QJsonDocument::Compact));
+    if(primary)for(auto i=value.begin();i!=value.end();++i)settings.setValue(i.key(),i.value().toVariant());
+    settings.setValue("autoHide",autoHide);settings.setValue("resumeAppearance",true);settings.sync();
+    if(settings.status()!=QSettings::NoError) {
+        for(const auto& key:keys)if(previous.contains(key))settings.setValue(key,previous[key]);else settings.remove(key);
+        settings.sync();refuse(QStringLiteral("Не удалось сохранить настройки."));return;
+    }
+    edge_=edge;detached_=detached;transparency_=transparency;widthPercent_=widthPercent;thickness_=thickness;islands_=islands;autoHide_=autoHide;
+    if(activeComponentMonitor_==target)activeComponentConfiguration_=activeComponents_.value(target).toMap();
+    restored_=true;
+    armStableResume();
+    status_=setResumeAtLogin(true)?QStringLiteral("Оформление и подтверждённый порядок применены."):
+        QStringLiteral("Изменения сохранены, но записать автозапуск не удалось.");
+    emit changed();
 }
 bool TaskbarSettings::widthAvailable() const { return umbrella::platform::TaskbarModuleSession::available(); }
 bool TaskbarSettings::sidesAvailable() const { return umbrella::platform::TaskbarModuleSession::layoutAvailable(); }
 void TaskbarSettings::resetAppearance() {
-    if (pending_) return;
+    if (pending_ || appearanceTransaction_) return;
     if (!resetComponentLayout()) return;
     QString error;
     if (appearance_.restore(error)) {
@@ -386,6 +466,7 @@ QVariantList TaskbarSettings::layoutMonitors() const {
 }
 
 bool TaskbarSettings::resetComponentLayout() {
+    if(appearanceTransaction_)return false;
     const auto owned=appearanceComponents_;
     bool ok=true;
     for(const auto& monitor:owned)if(!resetNativeComponents(monitor))ok=false;
@@ -536,7 +617,7 @@ bool TaskbarSettings::replayConfirmedComponents() {
     }
     restored_=appearance_.nativeSessionActive() || !activeComponents_.isEmpty();
     if(!unavailable.isEmpty())status_=QStringLiteral("Оформление восстановлено. Сохранённый порядок временно несовместим с режимом панели: ")+unavailable.join(", ");
-    return ok;
+    return ok && unavailable.isEmpty();
 }
 QStringList TaskbarSettings::componentIds(const QString& monitor,bool refresh) {
     QString device;bool primary=false;
@@ -592,35 +673,52 @@ bool TaskbarSettings::resetNativeComponents(const QString& monitor) {
     appearanceComponents_.remove(monitor);legacyTrayComponents_.remove(monitor);return true;
 }
 bool TaskbarSettings::applyComponentConfiguration(const QString& monitor,const QVariantMap& configuration) {
+    if(appearanceTransaction_)return false;
     if(!supportedComponentConfiguration(configuration)){status_=QStringLiteral("Недопустимая конфигурация компонентов.");emit changed();return false;}
     auto proposed=confirmedComponents_;proposed.insert(monitor,configuration);
     if(proposed.size()>16 || QJsonDocument(QJsonObject::fromVariantMap(proposed)).toJson(QJsonDocument::Compact).size()>65536)return false;
     const auto previous=activeComponents_.value(monitor).toMap();
+    const auto previousConfirmed=confirmedComponents_;
+    QSettings settings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
+    const QStringList keys{"confirmedComponentsV2","confirmedComponentV1","componentDraftsV1","resumeAppearance","resumeComponents"};
+    QVariantMap previousSettings;
+    for(const auto& key:keys)if(settings.contains(key))previousSettings.insert(key,settings.value(key));
     if(!applyNativeComponents(monitor,configuration)) {
         const auto error=status_;
-        if(!previous.isEmpty() && !applyNativeComponents(monitor,previous)) {
-            activeComponents_.remove(monitor);confirmedComponents_.remove(monitor);persistConfirmedComponents();
+        const bool preserved=appearance_.nativeSessionActive()?appearance_.previousPlacementPreserved():componentSession_.previousPlacementPreserved();
+        if(!previous.isEmpty() && !preserved && !applyNativeComponents(monitor,previous)) {
+            activeComponents_.remove(monitor);
             if(activeComponentMonitor_==monitor){activeComponentMonitor_.clear();activeComponentConfiguration_.clear();}
-            status_=QStringLiteral("Перемещение и восстановление прежней позиции не подтверждены. Автоприменение этого монитора отключено.");
+            status_=QStringLiteral("Перемещение и восстановление прежней позиции не подтверждены. Прежний порядок сохранён; повтор в этом сеансе отключён.");
         } else status_=error;
         emit changed();return false;
     }
     activeComponents_.insert(monitor,configuration);confirmedComponents_=proposed;
     activeComponentConfiguration_=configuration;activeComponentMonitor_=monitor;
     bool saved=persistConfirmedComponents() && saveComponentDraft(monitor,configuration);
-    QSettings settings(QSettings::IniFormat,QSettings::UserScope,"UmbrellaShell","Taskbar");
     // Saving component-only placement must not resurrect an old disabled
     // islands/size profile at the next launch.
     settings.setValue("resumeComponents",true);
-    settings.setValue("resumeAppearance",appearance_.nativeSessionActive());settings.sync();
-    saved=saved && settings.status()==QSettings::NoError && setResumeAtLogin(true);
-    status_=saved?QString():QStringLiteral("Расположение применено, но сохранить его не удалось.");
+    settings.sync();saved=saved && settings.status()==QSettings::NoError;
+    if(!saved) {
+        bool rolledBack=previous.isEmpty()?resetNativeComponents(monitor):applyNativeComponents(monitor,previous);
+        if(previous.isEmpty() || !rolledBack)activeComponents_.remove(monitor);else activeComponents_.insert(monitor,previous);
+        confirmedComponents_=previousConfirmed;
+        for(const auto& key:keys)if(previousSettings.contains(key))settings.setValue(key,previousSettings[key]);else settings.remove(key);
+        settings.sync();
+        activeComponentConfiguration_=activeComponents_.value(monitor).toMap();
+        activeComponentMonitor_=activeComponentConfiguration_.isEmpty()?QString():monitor;
+        status_=rolledBack?QStringLiteral("Не удалось сохранить перенос; прежние позиции восстановлены."):
+            QStringLiteral("Ошибка сохранения; откат позиций не подтверждён.");
+        emit changed();return false;
+    }
+    status_=setResumeAtLogin(true)?QString():QStringLiteral("Расположение сохранено, но записать автозапуск не удалось.");
     emit changed();return true;
 }
 bool TaskbarSettings::restoreComponentConfiguration(const QString& monitor) {
     bool found = false;
     for (const auto& entry : layoutMonitors()) if (entry.toMap().value("id").toString() == monitor) found = true;
-    if (!found || pending_) return false;
+    if (!found || pending_ || appearanceTransaction_) return false;
     QSettings settings(QSettings::IniFormat, QSettings::UserScope, "UmbrellaShell", "Taskbar");
     const bool confirmedTarget=confirmedComponents_.contains(monitor);
     if (activeComponents_.contains(monitor) && !resetNativeComponents(monitor)) {

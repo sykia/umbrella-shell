@@ -19,6 +19,8 @@
 #include <array>
 #include <vector>
 #include <algorithm>
+#include <map>
+#include <cmath>
 
 namespace umbrella::platform {
 namespace {
@@ -78,6 +80,7 @@ struct Snapshot {
     RECT lastRect{}; bool regionApplied = false;
     int lastGap = -1;
     bool detached = false, islands = false;
+    bool configured=false;
 };
 bool valid(const Snapshot& s) {
     DWORD pid{};
@@ -202,6 +205,7 @@ bool restoreJournal(const QString& path) {
 }
 }
 struct TaskbarAppearance::Impl {
+    std::map<QString,TaskbarProfile> profiles;
     std::vector<Snapshot> snapshots;
     int originalEdge = -1;
     LocationSetting originalLocation;
@@ -215,6 +219,7 @@ struct TaskbarAppearance::Impl {
     inline static Impl* active{};
     void updateRegions() {
         for (auto& snapshot : snapshots) {
+            if(!snapshot.configured)continue;
             if (snapshot.islands) continue;
             if (!valid(snapshot)) continue;
             RECT rect{};
@@ -268,16 +273,7 @@ TaskbarAppearance::~TaskbarAppearance() {
     }
 }
 
-bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
-    const int requested = edge == "left" ? ABE_LEFT : edge == "top" ? ABE_TOP
-        : edge == "right" ? ABE_RIGHT : edge == "bottom" ? ABE_BOTTOM : -1;
-    if (requested < 0 || transparency < 0 || transparency > 100 || widthPercent < 40 || widthPercent > 100 || thickness < 48 || thickness > 96) {
-        error = QStringLiteral("Недопустимые параметры панели."); return false;
-    }
-    const bool vertical = requested == ABE_LEFT || requested == ABE_RIGHT;
-    if (vertical && !TaskbarModuleSession::layoutAvailable()) {
-        error = QStringLiteral("Боковая раскладка не проверена для этой сборки Windows."); return false;
-    }
+bool TaskbarAppearance::prepare(QString& error) {
     auto& d = *impl_;
     if (d.stop && d.watcher.state() == QProcess::NotRunning) {
         error = QStringLiteral("Процесс восстановления завершился. Сначала верните исходный вид."); return false;
@@ -332,6 +328,55 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
             return false;
         }
     }
+    // Capture baseline profiles only when their geometry is representable.
+    // Unknown pre-existing custom styles must not be guessed for rollback.
+    for(const auto& snapshot:d.snapshots) {
+        if(!valid(snapshot))continue;
+        MONITORINFOEXW monitor{};monitor.cbSize=sizeof(monitor);RECT rect{};
+        if(!GetWindowRect(snapshot.hwnd,&rect) || !GetMonitorInfoW(MonitorFromWindow(snapshot.hwnd,MONITOR_DEFAULTTONULL),&monitor))continue;
+        const auto name=QString::fromWCharArray(monitor.szDevice);
+        if(d.profiles.contains(name))continue;
+        const auto dpi=GetDpiForWindow(snapshot.hwnd);
+        const auto opacity=snapshot.layered?snapshot.alpha:255;
+        const int transparency=((255-opacity)*100+127)/255;
+        bool simpleRegion=snapshot.region.isEmpty();
+        if(!simpleRegion) {
+            HRGN original=ExtCreateRegion(nullptr,static_cast<DWORD>(snapshot.region.size()),reinterpret_cast<const RGNDATA*>(snapshot.region.constData()));
+            HRGN full=CreateRectRgn(0,0,rect.right-rect.left,rect.bottom-rect.top);
+            simpleRegion=original && full && EqualRgn(original,full);
+            if(original)DeleteObject(original);if(full)DeleteObject(full);
+        }
+        if(!dpi || !simpleRegion || rect.left!=monitor.rcMonitor.left || rect.right!=monitor.rcMonitor.right ||
+            std::abs((rect.bottom-rect.top)*96./dpi-48)>.5 || (255*(100-transparency)+50)/100!=opacity)continue;
+        const QString edge=rect.bottom==monitor.rcMonitor.bottom?"bottom":rect.top==monitor.rcMonitor.top?"top":"";
+        if(!edge.isEmpty())d.profiles.emplace(name,TaskbarProfile{edge,false,false,transparency,100,48});
+    }
+    if(!d.module.start(error))return false;
+    if(!d.locationHook) {
+        Impl::active=&d;
+        d.locationHook=SetWinEventHook(EVENT_OBJECT_LOCATIONCHANGE,EVENT_OBJECT_LOCATIONCHANGE,nullptr,
+            Impl::locationChanged,0,0,WINEVENT_OUTOFCONTEXT|WINEVENT_SKIPOWNPROCESS);
+        if(!d.locationHook){error=QStringLiteral("Не удалось включить обработку геометрии панели.");return false;}
+    }
+    return true;
+}
+std::optional<TaskbarProfile> TaskbarAppearance::monitorProfile(const QString& device) const {
+    const auto entry=impl_->profiles.find(device);
+    return entry==impl_->profiles.end()?std::nullopt:std::optional<TaskbarProfile>(entry->second);
+}
+bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
+    const int requested = edge == "left" ? ABE_LEFT : edge == "top" ? ABE_TOP
+        : edge == "right" ? ABE_RIGHT : edge == "bottom" ? ABE_BOTTOM : -1;
+    if (requested < 0 || transparency < 0 || transparency > 100 || widthPercent < 40 || widthPercent > 100 || thickness < 48 || thickness > 96) {
+        error = QStringLiteral("Недопустимые параметры панели."); return false;
+    }
+    const bool vertical = requested == ABE_LEFT || requested == ABE_RIGHT;
+    if (vertical && !TaskbarModuleSession::layoutAvailable()) {
+        error = QStringLiteral("Боковая раскладка не проверена для этой сборки Windows."); return false;
+    }
+    if(!prepare(error))return false;
+    auto& d=*impl_;
+    const auto windows=taskbarWindows();
     for (const auto hwnd : windows) {
         bool identityValid = false;
         for (const auto& snapshot : d.snapshots) if (snapshot.hwnd == hwnd && valid(snapshot)) identityValid = true;
@@ -360,7 +405,7 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
         for (auto& snapshot : d.snapshots) snapshot.regionApplied = false;
     d.detached = detached;
     d.islands = islands;
-    for (auto& snapshot : d.snapshots) { snapshot.detached = detached; snapshot.islands = islands; }
+    for (auto& snapshot : d.snapshots) { snapshot.detached = detached; snapshot.islands = islands;snapshot.configured=true; }
     d.updateRegions();
     for (const auto& snapshot : d.snapshots)
         if (!islands && valid(snapshot) && !snapshot.regionApplied) error = QStringLiteral("Windows отклонила форму панели.");
@@ -371,30 +416,46 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
         if (!d.locationHook) error = QStringLiteral("Не удалось включить обработку геометрии панели.");
     }
     if (!error.isEmpty()) { QString ignored; restore(ignored); return false; }
+    for(const auto& snapshot:d.snapshots) {
+        MONITORINFOEXW info{};info.cbSize=sizeof(info);
+        if(valid(snapshot) && GetMonitorInfoW(MonitorFromWindow(snapshot.hwnd,MONITOR_DEFAULTTONULL),&info))
+            d.profiles[QString::fromWCharArray(info.szDevice)]={edge,detached,islands,transparency,widthPercent,thickness};
+    }
     return true;
 }
 bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
     auto& d = *impl_;
-    if (transparency < 0 || transparency > 100 || thickness < (islands ? 64 : 48) || thickness > 96) {
+    if (transparency < 0 || transparency > 100 || thickness < (islands ? 64 : 48) || thickness > 96 ||
+        widthPercent<40 || widthPercent>100 || (edge!="bottom" && edge!="top" && edge!="left" && edge!="right")) {
         error = QStringLiteral("Invalid monitor configuration."); return false;
     }
+    if(!prepare(error))return false;
     for (auto& snapshot : d.snapshots) {
         if (!valid(snapshot)) continue;
         MONITORINFOEXW monitor{}; monitor.cbSize = sizeof(monitor);
         if (!GetMonitorInfoW(MonitorFromWindow(snapshot.hwnd, MONITOR_DEFAULTTONULL), &monitor) || device != QString::fromWCharArray(monitor.szDevice)) continue;
         if (!d.module.apply(detached ? widthPercent : 100, edge, thickness, islands, detached, error, device)) return false;
-        if (!SetLayeredWindowAttributes(snapshot.hwnd, 0, static_cast<BYTE>((255 * (100 - transparency) + 50) / 100), LWA_ALPHA)) {
+        const auto style=GetWindowLongPtrW(snapshot.hwnd,GWL_EXSTYLE);
+        SetLastError(0);const auto previous=SetWindowLongPtrW(snapshot.hwnd,GWL_EXSTYLE,style|WS_EX_LAYERED);
+        if ((!previous && GetLastError()) || !SetLayeredWindowAttributes(snapshot.hwnd, 0, static_cast<BYTE>((255 * (100 - transparency) + 50) / 100), LWA_ALPHA)) {
             error = QStringLiteral("Windows rejected monitor transparency."); return false;
         }
-        snapshot.detached = detached; snapshot.islands = islands; snapshot.regionApplied = false;
+        BYTE alpha{};COLORREF key{};DWORD flags{};
+        if(!GetLayeredWindowAttributes(snapshot.hwnd,&key,&alpha,&flags) || !(flags&LWA_ALPHA) || alpha!=(255*(100-transparency)+50)/100) {
+            error=QStringLiteral("Windows не подтвердила прозрачность выбранной панели.");return false;
+        }
+        snapshot.detached = detached; snapshot.islands = islands; snapshot.regionApplied = false;snapshot.configured=true;
         d.updateRegions();
-        return islands || snapshot.regionApplied;
+        if(!islands && !snapshot.regionApplied){error=QStringLiteral("Windows не подтвердила форму выбранной панели.");return false;}
+        d.profiles[device]={edge,detached,islands,transparency,widthPercent,thickness};
+        return true;
     }
     error = QStringLiteral("Monitor taskbar unavailable."); return false;
 }
 bool TaskbarAppearance::nativeSessionActive() const {return impl_->module.running();}
 bool TaskbarAppearance::reorderTray(const QString& device,unsigned order,QString& error) {return impl_->module.reorderTray(device,order,error);}
 bool TaskbarAppearance::placeComponents(const QByteArray& command,const QString& device,QString& error) {return impl_->module.placeComponents(command,device,error);}
+bool TaskbarAppearance::previousPlacementPreserved() const {return impl_->module.previousPlacementPreserved();}
 void TaskbarAppearance::setComponentLossHandler(std::function<void(const QString&)> handler) {impl_->module.componentLost=std::move(handler);}
 bool TaskbarAppearance::restore(QString& error) {
     auto& d = *impl_;
@@ -413,7 +474,7 @@ bool TaskbarAppearance::restore(QString& error) {
         SetEvent(d.stop); d.watcher.waitForFinished(2000);
         CloseHandle(d.stop); d.stop = nullptr;
     }
-    d.snapshots.clear(); d.originalEdge = -1; d.journal.clear();
+    d.snapshots.clear();d.profiles.clear(); d.originalEdge = -1; d.journal.clear();
     return true;
 }
 int watchTaskbarAppearance(unsigned long parent, const QString& journal, const QString& stopEvent) {

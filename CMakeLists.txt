@@ -109,7 +109,7 @@ if(UMBRELLA_BUILD_APP)
         set_tests_properties(dock_fixture PROPERTIES TIMEOUT 30)
         # Explicit private-process XAML experiment; no Explorer or global input.
         add_executable(umbrella_xaml_layout_tests EXCLUDE_FROM_ALL tests/taskbar_xaml_layout_tests.cpp)
-        target_link_libraries(umbrella_xaml_layout_tests PRIVATE umbrella_core windowsapp user32 shell32)
+        target_link_libraries(umbrella_xaml_layout_tests PRIVATE umbrella_core windowsapp user32 shell32 d2d1 gdi32)
         target_compile_definitions(umbrella_xaml_layout_tests PRIVATE WINRT_NO_SOURCE_LOCATION UNICODE _UNICODE NOMINMAX)
         target_compile_options(umbrella_xaml_layout_tests PRIVATE /utf-8)
         target_link_options(umbrella_xaml_layout_tests PRIVATE /MANIFEST:NO)

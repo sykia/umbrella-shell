@@ -1,5 +1,6 @@
 #include "core/taskbar/Placement.h"
 #include "core/taskbar/ResumeBudget.h"
+#include "core/taskbar/SurfaceGeometry.h"
 #include "core/taskbar/TrayOrder.h"
 #include "core/taskbar/ComponentRegistry.h"
 #include <array>
@@ -11,6 +12,25 @@ void require(bool ok, const char* message) {
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
 int main() {
+    for(const double dpi:{96.,120.,144.,192.})for(const unsigned thickness:{48u,64u,96u})for(const unsigned edge:{1u,3u}) {
+        const double scale=dpi/96;
+        SurfaceSpec spec{true,edge,80,thickness,16};
+        SurfaceMeasurement measured{{-1728,edge==3?1080-thickness*scale:0,1536,thickness*scale},
+            {-1920,0,1920,1080},dpi,1536/scale,static_cast<double>(thickness),scale,0,0,false};
+        Rectangle viewport;
+        require(surfaceViewport(spec,measured,viewport) && viewport.x==16 && viewport.width==measured.rootWidth-32,
+            "Measured horizontal surface/DPI/negative monitor origin refused");
+        auto stale=measured;stale.rootWidth+=8;
+        require(!surfaceViewport(spec,stale,viewport),"Stale XAML extent accepted");
+        stale=measured;stale.rasterScale+=.25;
+        require(!surfaceViewport(spec,stale,viewport),"Rasterization scale mismatch accepted");
+        stale=measured;stale.panel.x+=20;
+        require(!surfaceViewport(spec,stale,viewport),"Off-centre surface accepted");
+        stale=measured;stale.rootX=6;
+        require(!surfaceViewport(spec,stale,viewport),"Unmapped root origin accepted");
+        stale=measured;stale.autoHide=true;
+        require(!surfaceViewport(spec,stale,viewport),"Autohide surface accepted");
+    }
     require(nextResumeAttempt(0)==1 && nextResumeAttempt(1)==2, "resume attempts unavailable");
     require(nextResumeAttempt(2)==0 && nextResumeAttempt(3)==0,
         "restarted owner may replay indefinitely");

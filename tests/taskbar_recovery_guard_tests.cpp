@@ -1,5 +1,7 @@
 // Fail-closed replay tests: deliberately never admit a native operation.
 #include "app/TaskbarSettings.h"
+#include "platform/windows/TaskbarRuntime.h"
+#include <Windows.h>
 #include <QGuiApplication>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -7,12 +9,23 @@
 #include <QJsonObject>
 #include <cstdlib>
 #include <iostream>
+struct TaskbarSettingsFixture {
+    static void lose(TaskbarSettings& model,const QString& device) {
+        model.activeComponents_=model.confirmedComponents_;
+        model.componentSession_.componentLost(device);
+    }
+};
 
 void require(bool ok, const char* message) {
     if (!ok) { std::cerr << message << '\n'; std::exit(1); }
 }
 int main(int argc, char** argv) {
     QGuiApplication app(argc, argv);
+    if(FindWindowW(L"Shell_TrayWnd",nullptr) && !umbrella::platform::TaskbarRuntime::monitors().isEmpty()) {
+        const auto owners=umbrella::platform::TaskbarRuntime::panelOwners();
+        require(!owners.isEmpty() && owners==umbrella::platform::TaskbarRuntime::panelOwners(),
+            "Stable Explorer owner identity unavailable for recovery budget reset");
+    }
     QTemporaryDir sandbox;
     require(sandbox.isValid(), "temporary settings unavailable");
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, sandbox.path());
@@ -48,12 +61,29 @@ int main(int argc, char** argv) {
         const auto confirmed = QJsonDocument(QJsonObject{{primary, draft}}).toJson(QJsonDocument::Compact);
         settings.setValue("confirmedComponentsV2", confirmed); settings.sync();
         TaskbarSettings model;
-        model.apply("bottom", true, 35, false, 80, 64, true);
-        require(model.status().contains(QStringLiteral("clipping")), "incompatible geometry not refused before native reset");
+        model.apply("left", true, 35, false, 80, 64, true);
+        require(!model.status().isEmpty(), "unsupported vertical geometry not refused before native reset");
         settings.sync();
         require(settings.value("confirmedComponentsV2").toByteArray() == confirmed &&
             settings.value("appearanceProfilesV1").toByteArray() == profiles,
             "refused appearance edit changed persisted layout or profiles");
+    }
+    const auto monitors=components.layoutMonitors();
+    if(monitors.size()==2 && !primary.isEmpty()) {
+        const auto draft=QJsonDocument::fromJson(R"({"version":1,"gap":8,"available":[],"left":["taskview"],"center":[],"right":[]})").object();
+        QJsonObject profiles;QString primaryDevice;
+        for(const auto& entry:monitors) {
+            const auto monitor=entry.toMap();profiles.insert(monitor["id"].toString(),draft);
+            if(monitor["id"].toString()==primary)primaryDevice=monitor["device"].toString();
+        }
+        const auto confirmed=QJsonDocument(profiles).toJson(QJsonDocument::Compact);
+        settings.setValue("confirmedComponentsV2",confirmed);settings.setValue("resumeAppearance",false);settings.setValue("resumeComponents",true);settings.sync();
+        TaskbarSettings lost;TaskbarSettingsFixture::lose(lost,primaryDevice);settings.sync();
+        require(lost.activeComponentConfigurations().size()==1 && !lost.activeComponentConfigurations().contains(primary),
+            "Native loss affected the other monitor");
+        require(settings.value("confirmedComponentsV2").toByteArray()==confirmed &&
+            !settings.value("resumeAppearance").toBool() && settings.value("resumeComponents").toBool(),
+            "Native loss discarded last confirmed intent or changed resume flags");
     }
     settings.setValue("resumeAppearance", false);
     settings.remove("resumeComponents");
