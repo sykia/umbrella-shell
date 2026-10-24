@@ -1,5 +1,6 @@
 #include "TaskbarSettings.h"
 #include "core/taskbar/TrayOrder.h"
+#include "core/taskbar/ComponentRegistry.h"
 #include "core/taskbar/ResumeBudget.h"
 #include "platform/windows/TaskbarState.h"
 #include "platform/windows/TaskbarModuleSession.h"
@@ -61,7 +62,7 @@ bool validAppearance(const QJsonObject& value) {
     const int width = value["widthPercent"].toVariant().toInt(), thickness = value["thickness"].toVariant().toInt();
     const int alpha = value["transparency"].toVariant().toInt();
     return (edge == "bottom" || edge == "top" || edge == "left" || edge == "right") && width >= 40 && width <= 100
-        && thickness >= (value["islands"].toVariant().toBool() ? 64 : 48) && thickness <= 96 && alpha >= 0 && alpha <= 100;
+        && thickness >= 48 && thickness <= 96 && alpha >= 0 && alpha <= 100;
 }
 QString monitorId(const QScreen* screen) {
     for (const auto& entry : umbrella::platform::TaskbarRuntime::monitors()) {
@@ -295,7 +296,7 @@ void TaskbarSettings::apply(const QString& edge, bool detached, int transparency
     if (pending_ || appearanceTransaction_) return;
     if (islands) detached = true;
     if (!detached) thickness = 48;
-    if (thickness < (islands ? 64 : 48) || thickness > 96 || (islands && !widthAvailable())) {
+    if (thickness < 48 || thickness > 96 || (islands && !widthAvailable())) {
         status_ = QStringLiteral("Недопустимый размер или модуль островков недоступен.");
         emit changed(); return;
     }
@@ -624,7 +625,16 @@ QStringList TaskbarSettings::componentIds(const QString& monitor,bool refresh) {
     for(const auto& entry:layoutMonitors())if(entry.toMap()["id"].toString()==monitor){device=entry.toMap()["device"].toString();primary=entry.toMap()["primary"].toBool();}
     if(device.isEmpty())return {};
     if(refresh || !componentCatalogue_.contains(device)) {
-        QString error;const auto snapshot=umbrella::platform::TaskbarModuleSession::discoverComponents(error);
+        QHash<QString,QStringList> retainedHidden;
+        for(const auto& entry:layoutMonitors()) {
+            const auto current=entry.toMap();
+            for(const auto& value:confirmedComponents_.value(current["id"].toString()).toMap()["available"].toList()) {
+                auto id=value.toString();if(id=="volume")continue;if(id=="network")id="quicksettings";
+                if(umbrella::taskbar::componentFromId(id.toStdWString())!=umbrella::taskbar::Component::Unknown)
+                    retainedHidden[current["device"].toString()].append(id);
+            }
+        }
+        QString error;const auto snapshot=umbrella::platform::TaskbarModuleSession::discoverComponents(error,retainedHidden);
         if(snapshot.isEmpty()){status_=error;return {};}
         componentCatalogue_=snapshot;
     }
@@ -646,6 +656,14 @@ bool TaskbarSettings::applyNativeComponents(const QString& monitor,const QVarian
             command+=' '+id.toLatin1()+':'+QByteArray::number(zoneIndex);++count;
         }
         ++zoneIndex;
+    }
+    const auto detected=componentIds(monitor);
+    for(const auto& entry:configuration["available"].toList()) {
+        auto id=entry.toString();
+        if(!detected.contains(id) || id=="desktop" || id=="volume")continue;
+        if(id=="network")id="quicksettings";
+        if(umbrella::taskbar::componentFromId(id.toStdWString())==umbrella::taskbar::Component::Unknown)continue;
+        command+=' '+id.toLatin1()+":3";++count;
     }
     if(!count){status_=QStringLiteral("Нет доступных исходных компонентов для переноса.");return false;}
     command+='\n';QString error;

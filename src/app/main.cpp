@@ -22,6 +22,8 @@
 #include <QDir>
 #include <QSettings>
 #include <QFile>
+#include <QTemporaryDir>
+#include <optional>
 
 int main(int argc, char* argv[]) {
     const bool smoke = argc == 2 && QByteArray(argv[1]) == "--ui-smoke";
@@ -65,6 +67,12 @@ int main(int argc, char* argv[]) {
     app.setOrganizationName("UmbrellaShell");
     app.setApplicationName("UmbrellaShell");
     app.setApplicationVersion(UMBRELLA_VERSION);
+    std::optional<QTemporaryDir> smokePreferences;
+    if(smoke) {
+        smokePreferences.emplace();
+        if(!smokePreferences->isValid())return 1;
+        QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,smokePreferences->path());
+    }
     umbrella::platform::TaskbarRuntime runtime;
     if (!smoke && !runtime.ownsInstance()) {
         umbrella::platform::activateExistingSettingsWindow(!resume);

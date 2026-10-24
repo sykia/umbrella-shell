@@ -520,7 +520,9 @@ int wmain(int argc, wchar_t** argv) {
             GetWindowRect(value.window, &now);
             if (now.right - now.left != wanted) failed = true;
             if (configure(value.window, width, true, 3, 47) || configure(value.window, width, true, 3, 97) ||
-                configure(value.window, width, true, 3, 48, true)) failed = true;
+                configure(value.window, width, true, 3, 47, true)) failed = true;
+            if(!configure(value.window,width,true,3,48,true))failed=true;
+            GetWindowRect(value.window,&now);if(now.bottom-now.top!=48)failed=true;
             if (!configure(value.window, width, true, 3, 72, true)) failed = true;
             GetWindowRect(value.window, &now);
             if (now.bottom - now.top != 72) failed = true;

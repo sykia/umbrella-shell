@@ -44,8 +44,9 @@ function remaining(items,id) { var group=dragIds(id); return items.filter(v => g
 function nativeConfiguration(value, primary, ids) {
     if (!valid(value)) return false
     if (primary===undefined) primary=true
-    var managed=id => id!=="systemtray" && id!=="trayapps"
-    if (JSON.stringify(value.available.filter(managed))!==JSON.stringify(defaults(primary,ids).available.filter(managed)) || (value.right.indexOf("desktop")>=0 && value.right[value.right.length-1]!=="desktop")) return false
+    if (value.available.indexOf("desktop")>=0 && defaults(primary,ids).right.indexOf("desktop")>=0) return false
+    if (value.right.indexOf("desktop")>=0 && value.right[value.right.length-1]!=="desktop") return false
+    if (Array.isArray(ids) && ["left","center","right"].some(z => value[z].some(id => ids.indexOf(id)<0))) return false
     return ["left","center","right"].every(function(zone) {
         var list=value[zone], network=list.indexOf("network"), volume=list.indexOf("volume")
         return (network<0 && volume<0) || (network>=0 && volume===network+1)
@@ -72,7 +73,7 @@ function reconcile(value, primary, ids) {
         if(placed.indexOf(id)>=0)return
         // A newly discovered optional group stays unmanaged until the user
         // places it, rather than displaying an unconfirmed new position.
-        if((id==="systemtray" || id==="trayapps") && value.available.indexOf(id)>=0)next.available.push(id)
+        if(movable(id) && value.available.indexOf(id)>=0)next.available.push(id)
         else next[key].push(id)
     })
     next.available.sort((a,b) => catalog.indexOf(component(a))-catalog.indexOf(component(b)))

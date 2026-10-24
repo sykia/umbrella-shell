@@ -68,7 +68,7 @@ Rectangle {
     function commit(next) {
         next = LayoutModel.clone(next)
         if (!canSubmit || !supported(next) || !monitor || applying) {
-            feedback = "Переносите компоненты между тремя областями. Показать рабочий стол остаётся справа."
+            feedback = "Переносите найденные компоненты между областями или в «Компоненты» для скрытия. Показать рабочий стол остаётся справа."
             return false
         }
         queuedConfiguration = next
@@ -134,7 +134,7 @@ Rectangle {
         if (id && zone) {
             var next = LayoutModel.move(configuration, id, zone, index)
             if (supported(next)) commit(next)
-            else feedback = "Переносите компоненты между тремя областями. Показать рабочий стол остаётся справа."
+            else feedback = "Переносите найденные компоненты между областями или в «Компоненты» для скрытия. Показать рабочий стол остаётся справа."
         }
     }
     function resetLayout() {
@@ -186,7 +186,7 @@ Rectangle {
             anchors.left:parent.left; anchors.leftMargin:36; anchors.right:parent.right; anchors.rightMargin:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
             Label { width:parent.width; text:chip.info.label; font.pixelSize:11; maximumLineCount:1; elide:Text.ElideRight }
             Label { width:parent.width; font.pixelSize:9; opacity:0.6
-                text: chip.movable ? (componentId === "apps" ? "Вся группа, исходный порядок приложений" : "Слева, в центре или справа") : ""
+                text: chip.movable ? (componentId === "apps" ? "Вся группа, исходный порядок приложений" : "Перенос или скрытие в «Компоненты»") : ""
                 visible:chip.movable
             }
         }
@@ -205,7 +205,7 @@ Rectangle {
                 Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
             }
         }
-        ToolTip.text: chip.movable ? "Перенос исходного компонента; сеть и громкость вместе. Нужна нижняя панель 100%, 48 DIP, DPI 100%." : LayoutModel.movementBlocker(componentId,
+        ToolTip.text: chip.movable ? "Перенос исходного компонента; сеть и громкость вместе. Нужна совместимая горизонтальная панель без автоскрытия." : !chip.knownHere ? "Компонент не найден на этом мониторе. Включите его в Windows и обновите состав." : LayoutModel.movementBlocker(componentId,
             !!(editor.monitor && editor.monitor.primary), !!(editor.system && editor.system.componentPlacementAvailable))
         Accessible.name: info.label
         MouseArea {
@@ -265,7 +265,7 @@ Rectangle {
                         model:editor.configuration.available
                         Chip { required property string modelData; componentId:modelData; width:168; inCatalog:true }
                     }
-                    Label { visible:editor.configuration.available.length === 0; text:"Все компоненты размещены. Перетащите сюда для возврата."; width:300; height:52; verticalAlignment:Text.AlignVCenter }
+                    Label { visible:editor.configuration.available.length === 0; text:"Все компоненты размещены. Перетащите сюда для скрытия."; width:300; height:52; verticalAlignment:Text.AlignVCenter }
                 }
                 ScrollBar.horizontal: ScrollBar { }
             }

@@ -13,6 +13,7 @@
 #include <functional>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
+#include <winrt/Windows.UI.Xaml.Data.h>
 #include <winrt/Windows.Foundation.Collections.h>
 
 namespace umbrella::explorer::component_layout {
@@ -34,6 +35,20 @@ class Session {
         winrt::Windows::Foundation::Rect slot{};
         taskbar::Rectangle measured;
         winrt::Windows::Foundation::Rect committedSlot{};
+    };
+    struct PropertySnapshot {
+        FrameworkElement item{nullptr};DependencyProperty property{nullptr};Value local{nullptr};
+        Data::Binding binding{nullptr};
+        PropertySnapshot()=default;
+        PropertySnapshot(const FrameworkElement& element,const DependencyProperty& key):item(element),property(key),local(element.ReadLocalValue(key)) {
+            if(auto expression=element.GetBindingExpression(key))binding=expression.ParentBinding();
+        }
+        void restore() const {
+            if(!item || !property)return;
+            if(binding)Data::BindingOperations::SetBinding(item,property,binding);
+            else if(local==DependencyProperty::UnsetValue())item.ClearValue(property);
+            else item.SetValue(property,local);
+        }
     };
     struct Control {
         bool active=true,writing=false;
@@ -62,6 +77,10 @@ class Session {
         std::vector<Binding> bindings;
         struct Role {UIElement item{nullptr};taskbar::Component role;};
         std::vector<Role> roles;
+        struct Presentation {UIElement item{nullptr};PropertySnapshot opacity,hit,enabled;};
+        std::vector<Presentation> presentation;
+        std::vector<PropertySnapshot> widths;
+
         std::vector<taskbar::Move> confirmed;
     };
     std::shared_ptr<Control> control_;
@@ -128,6 +147,36 @@ class Session {
         }
         return false;
     }
+    static double widgetWidth(const FrameworkElement& item) {
+        // Measure original visible content, never infer it from weather text or
+        // replace the button. Limit traversal and retain native size if uncertain.
+        double right=0,left=item.ActualWidth();unsigned count=0;
+        std::vector<DependencyObject> pending{item};
+        while(!pending.empty()) {
+            if(++count>96)return 0;
+            auto node=pending.back();pending.pop_back();
+            if(auto element=node.try_as<FrameworkElement>()) {
+                if(element.Visibility()!=Visibility::Visible || element.Opacity()==0)continue;
+                const auto type=winrt::get_class_name(element);
+                if(type==L"Windows.UI.Xaml.Controls.TextBlock" || type==L"Windows.UI.Xaml.Controls.Image" ||
+                    type==L"Windows.UI.Xaml.Controls.FontIcon" || type==L"Windows.UI.Xaml.Controls.BitmapIcon" ||
+                    type==L"Windows.UI.Xaml.Controls.SymbolIcon" || type==L"Windows.UI.Xaml.Controls.ImageIcon" ||
+                    type==L"Windows.UI.Xaml.Shapes.Path" || type==L"Microsoft.UI.Xaml.Controls.AnimatedVisualPlayer") {
+                    const auto desired=element.DesiredSize();
+                    const auto width=desired.Width>0?(std::min)(static_cast<double>(desired.Width),element.ActualWidth()):element.ActualWidth();
+                    const auto box=element.TransformToVisual(item).TransformBounds({0,0,static_cast<float>(width),static_cast<float>(element.ActualHeight())});
+                    if(box.Width>0 && box.Height>0){left=(std::min)(left,static_cast<double>(box.X));right=(std::max)(right,static_cast<double>(box.X+box.Width));}
+                }
+            }
+            const auto size=Media::VisualTreeHelper::GetChildrenCount(node);
+            if(size<0 || pending.size()+size>96)return 0;
+            for(int i=0;i<size;++i)pending.push_back(Media::VisualTreeHelper::GetChild(node,i));
+        }
+        // Keep the measured leading inset: an unclassified weather icon may
+        // precede the text. Trim only confirmed trailing whitespace.
+        const double footprint=right+8;
+        return right>0 && left>=0 && footprint<item.ActualWidth()-.5?footprint:0;
+    }
     static void collect(Control& c,const FrameworkElement& parent) {
         const int count=Media::VisualTreeHelper::GetChildrenCount(parent);
         if(count<0 || count>64)winrt::throw_hresult(E_BOUNDS);
@@ -161,7 +210,39 @@ class Session {
             c.bindings.push_back({item,parent,cached->role,Controls::Primitives::LayoutInformation::GetLayoutSlot(item),box});
         }
     }
+    static bool hidden(const Control& c,taskbar::Component role) {
+        for(unsigned i=0;i<c.request.count;++i)
+            if(c.request.entries[i].zone==3 && taskbar::componentFromId(c.request.entries[i].id)==role)return true;
+        return false;
+    }
+    static bool restorePresentation(Control& c) noexcept {
+        bool ok=true;
+        for(const auto& saved:c.presentation)try {saved.opacity.restore();saved.hit.restore();saved.enabled.restore();}catch(...){ok=false;}
+        for(const auto& saved:c.widths)try{saved.restore();}catch(...){ok=false;}
+        if(ok){c.widths.clear();c.presentation.clear();}
+        return ok;
+    }
+    static void present(Control& c) {
+        for(const auto& binding:c.bindings) {
+            auto saved=std::find_if(c.presentation.begin(),c.presentation.end(),[&](const auto& value){return value.item==binding.element;});
+            if(hidden(c,binding.role)) {
+                if(saved==c.presentation.end()) {
+                    if(c.presentation.size()>=128)winrt::throw_hresult(E_BOUNDS);
+                    const auto element=binding.element.as<FrameworkElement>();
+                    PropertySnapshot enabled;
+                    if(element.try_as<Controls::Control>())enabled=PropertySnapshot(element,Controls::Control::IsEnabledProperty());
+                    c.presentation.push_back({binding.element,PropertySnapshot(element,UIElement::OpacityProperty()),
+                        PropertySnapshot(element,UIElement::IsHitTestVisibleProperty()),enabled});
+                }
+                binding.element.Opacity(0);binding.element.IsHitTestVisible(false);
+                if(auto control=binding.element.try_as<Controls::Control>())control.IsEnabled(false);
+            } else if(saved!=c.presentation.end()) {
+                saved->opacity.restore();saved->hit.restore();saved->enabled.restore();c.presentation.erase(saved);
+            }
+        }
+    }
     static void fail(Control& c,HRESULT status) noexcept {
+        if(!restorePresentation(c))status=E_UNEXPECTED;
         c.status=status;c.active=false;c.confirmed.clear();
         if(c.notificationOwner) {
             PostMessageW(c.notificationOwner,placementLostMessage,c.notificationSerial,reinterpret_cast<LPARAM>(c.notificationTarget));
@@ -186,7 +267,8 @@ class Session {
             if(!id || id>c.bindings.size() || generation!=c.generation)return false;
             const auto& binding=c.bindings[id-1];
             if(!binding.element.XamlRoot() || binding.element.XamlRoot()!=c.root.XamlRoot() || Media::VisualTreeHelper::GetParent(binding.element)!=binding.parent)return false;
-            box=bounds(c,binding.element);return taskbar::valid(box);
+            box=bounds(c,binding.element);
+            return taskbar::valid(box);
         }
         bool write(std::uint64_t id,taskbar::Rectangle target) const {
             if(!id || id>c.bindings.size() || generation!=c.generation || !taskbar::inside(target,c.root.ActualWidth(),c.root.ActualHeight()))return false;
@@ -221,12 +303,13 @@ class Session {
             }
             // LayoutUpdated is a notification, never a polling timer. A stable
             // verified pass performs no writes and no tree scan.
-            if(c.appliedGeneration==c.generation && !c.confirmed.empty() &&
+            if(c.appliedGeneration==c.generation &&
                 c.appliedDpi==dpi &&
                 c.epochWidth==c.root.ActualWidth() && c.epochHeight==c.root.ActualHeight() &&
                 c.repeaterChildren==Media::VisualTreeHelper::GetChildrenCount(c.repeater) &&
                 c.trayChildren==Media::VisualTreeHelper::GetChildrenCount(c.tray)) {
                 bool stable=true;
+                for(const auto& saved:c.presentation)if(saved.item.Opacity()!=0 || saved.item.IsHitTestVisible())stable=false;
                 for(const auto& move:c.confirmed) {
                     if(move.instance>c.bindings.size()){stable=false;break;}
                     const auto& binding=c.bindings[move.instance-1];
@@ -244,19 +327,31 @@ class Session {
             }
             c.writing=true;
             struct Finish {bool& flag;~Finish(){flag=false;}} finish{c.writing};
-            c.bindings.clear();collect(c,c.repeater);collect(c,c.tray);
+            c.bindings.clear();collect(c,c.repeater);collect(c,c.tray);present(c);
+            bool resized=false;
+            for(const auto& binding:c.bindings)if(binding.role==taskbar::Component::Widgets && !hidden(c,binding.role)) {
+                const auto element=binding.element.as<FrameworkElement>();const auto compact=widgetWidth(element);
+                if(compact>0) {
+                    if(std::none_of(c.widths.begin(),c.widths.end(),[&](const auto& saved){return saved.item==element;})) {
+                        if(c.widths.size()>=64)winrt::throw_hresult(E_BOUNDS);
+                        c.widths.emplace_back(element,FrameworkElement::WidthProperty());
+                    }
+                    element.Width(compact);resized=true;
+                }
+            }
+            if(resized){c.root.UpdateLayout();c.bindings.clear();collect(c,c.repeater);collect(c,c.tray);present(c);}
             c.repeaterChildren=Media::VisualTreeHelper::GetChildrenCount(c.repeater);
             c.trayChildren=Media::VisualTreeHelper::GetChildrenCount(c.tray);
             std::erase_if(c.roles,[&](const auto& cached){return std::none_of(c.bindings.begin(),c.bindings.end(),[&](const auto& binding){return binding.element==cached.item;});});
             std::vector<taskbar::MeasuredItem> items;items.reserve(c.bindings.size());
             for(size_t i=0;i<c.bindings.size();++i) {
-                const auto& item=c.bindings[i];items.push_back({i+1,item.role,item.measured,
+                const auto& item=c.bindings[i];if(hidden(c,item.role))continue;items.push_back({i+1,item.role,item.measured,
                     item.role!=taskbar::Component::Unknown && item.role!=taskbar::Component::Desktop});
             }
             std::vector<taskbar::Assignment> assignments;assignments.reserve(c.request.count);
             for(unsigned i=0;i<c.request.count;++i) {
                 const auto requested=taskbar::componentFromId(c.request.entries[i].id);
-                if(requested==taskbar::Component::Desktop)continue; // Preserve the physical edge slot.
+                if(requested==taskbar::Component::Desktop || c.request.entries[i].zone==3)continue; // Preserve the physical edge slot.
                 // Missing conditional groups retain placement intent without
                 // acquiring a fake slot or object. An empty plan still fails.
                 if(std::any_of(c.bindings.begin(),c.bindings.end(),[&](const auto& binding){return binding.role==requested;}))
@@ -270,7 +365,8 @@ class Session {
                 viewport.height+=c.root.ActualHeight()-c.viewportRootHeight;
             }
             if(c.panel && c.surface.enabled)viewport=measuredViewport;
-            const auto plan=taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap,{},viewport);
+            const auto plan=assignments.empty()?taskbar::Plan{taskbar::PlanStatus::Ready,{}}:
+                taskbar::plan(items,assignments,c.root.ActualWidth(),c.root.ActualHeight(),c.request.gap,{},viewport);
             if(plan.status!=taskbar::PlanStatus::Ready){c.failurePhase=1;c.failureItem=static_cast<unsigned>(plan.status);fail(c,HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED));return;}
             // If an owner continually reinstates its positions, give up well
             // before XAML reports a layout cycle. Source reset/resize events must
@@ -293,16 +389,23 @@ class Session {
             std::unique_ptr<ClipUpdate> clip;
             if(c.clipFactory) {
                 std::vector<taskbar::Rectangle> destination;destination.reserve(c.bindings.size());
-                for(const auto& binding:c.bindings)destination.push_back(binding.measured);
-                for(const auto& move:plan.moves)destination[move.instance-1]=move.after;
+                for(size_t i=0;i<c.bindings.size();++i) {
+                    const auto& binding=c.bindings[i];if(hidden(c,binding.role))continue;
+                    const auto moved=std::find_if(plan.moves.begin(),plan.moves.end(),[&](const auto& value){return value.instance==i+1;});
+                    destination.push_back(moved==plan.moves.end()?binding.measured:moved->after);
+                }
                 clip=c.clipFactory(destination,c.root.ActualWidth(),c.root.ActualHeight());
                 if(!clip){c.failurePhase=7;fail(c,E_ABORT);return;}
             }
-            Adapter adapter{c,clip.get()};
+                        Adapter adapter{c,clip.get()};
             auto result=taskbar::transact(plan.moves,adapter);
+            if(plan.moves.empty()) {
+                result=taskbar::Transaction::Applied;
+                if(clip){adapter.clipAttempted=true;if(!clip->apply())result=taskbar::Transaction::RollbackFailed;}
+            }
             if(result!=taskbar::Transaction::Applied && adapter.clipAttempted && !clip->rollback())
                 result=taskbar::Transaction::RollbackFailed;
-            if(result!=taskbar::Transaction::Applied){if(!c.failurePhase)c.failurePhase=5;fail(c,result==taskbar::Transaction::RollbackFailed?E_UNEXPECTED:E_ABORT);return;}
+            if(result!=taskbar::Transaction::Applied){if(!c.failurePhase){c.failurePhase=5;c.failureItem=static_cast<unsigned>(result);}fail(c,result==taskbar::Transaction::RollbackFailed?E_UNEXPECTED:E_ABORT);return;}
             for(auto& binding:c.bindings)binding.committedSlot=Controls::Primitives::LayoutInformation::GetLayoutSlot(binding.element.as<FrameworkElement>());
             c.confirmed=plan.moves;c.appliedGeneration=c.generation;c.appliedDpi=dpi;c.status=S_OK;++c.passes;
         }catch(...){fail(c,winrt::to_hresult());}
@@ -423,7 +526,7 @@ public:
             return measureSurface(*sample,viewport)?S_OK:MAKE_HRESULT(SEVERITY_ERROR,FACILITY_ITF,0x300+sample->failureItem);
         }catch(...){return winrt::to_hresult();}
     }
-    bool ownsClip() const noexcept {return control_ && control_->active && control_->clipFactory && !control_->confirmed.empty();}
+    bool ownsClip() const noexcept {return control_ && control_->active && control_->clipFactory && SUCCEEDED(control_->status);}
     ~Session(){reset();}
     void notifyFailure(HWND owner,HWND target,unsigned serial) noexcept {
         if(control_ && control_->active){control_->notificationOwner=owner;control_->notificationTarget=target;control_->notificationSerial=serial;}
@@ -462,7 +565,7 @@ public:
             if(FAILED(status)) {
                 // Preserve bounded diagnostics without retaining failed objects.
                 lastReport_=report(status);
-                if(previousRequest.count) {
+                if(previousRequest.count && restorePresentation(*control_)) {
                     control_->active=true;control_->request=previousRequest;control_->viewport=previousViewport;
                     control_->clipFactory=previousClipFactory;
                     control_->surface=previousSurface;
@@ -492,6 +595,7 @@ public:
     bool reset() noexcept {
         if(!control_)return true;
         bool success=true;auto c=control_;c->active=false;
+        success=restorePresentation(*c);
         try {if(subscribed_){c->root.LayoutUpdated(updated_);subscribed_=false;}}
         catch(...){success=false;}
         try {if(traySizeSubscribed_){c->tray.SizeChanged(traySize_);traySizeSubscribed_=false;}}

@@ -118,6 +118,12 @@ def main():
         require(root.property("dragId") == "", "capture leaked")
     initial = config()
     require(not backend.calls,"opening must not write Windows")
+    # Native-discovered components can be hidden in the catalogue and returned.
+    drag("search","available",0)
+    require("search" in config()["available"],"active component could not be hidden")
+    drag("search","center",1)
+    require("search" in config()["center"],"hidden component could not return to panel")
+    backend.calls.clear();backend.drafts.clear()
     # Unsupported components cannot begin a drag or change the saved state.
     source = center(item("component_desktop"))
     QTest.mousePress(view,Qt.LeftButton,Qt.NoModifier,source)

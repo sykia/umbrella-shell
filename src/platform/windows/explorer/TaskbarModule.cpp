@@ -401,7 +401,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             const auto config = *static_cast<const Configuration*>(packet->lpData);
             if (config.size != sizeof(config) || config.version != 3 || config.widthPercent < 40 ||
                 config.widthPercent > 100 || config.enabled > 1 || config.edge > 3 ||
-                config.thickness < (config.islands ? 64u : 48u) || config.thickness > 96 || config.islands > 1 || config.detached > 1) return FALSE;
+                config.thickness < 48u || config.thickness > 96 || config.islands > 1 || config.detached > 1) return FALSE;
             if (!config.enabled) return TRUE; // Attach handshake must not change Windows.
             if (!state->enabled) state->visuals.prepare(hwnd);
             RECT rect{};

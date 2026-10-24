@@ -13,7 +13,7 @@ public:
     ~TaskbarModuleSession();
     static bool available();
     static bool layoutAvailable();
-    static QHash<QString,QStringList> discoverComponents(QString& error);
+    static QHash<QString,QStringList> discoverComponents(QString& error,const QHash<QString,QStringList>& retainedHidden={});
     bool start(QString& error);
     bool apply(int percent, const QString& edge, int thickness, bool islands, bool detached, QString& error, const QString& monitor = {});
     bool stop(QString& error);
@@ -26,6 +26,7 @@ public:
     std::function<void(const QString&)> componentLost;
 private:
     friend struct TaskbarModuleSessionTest;
+    static QHash<QString,QStringList> decodeComponents(const QByteArray& output,const QHash<QString,QStringList>& retainedHidden);
     bool waitForLine(const QByteArray& expected);
     void readOutput();
     void deferLoss(const QString& device,unsigned serial);

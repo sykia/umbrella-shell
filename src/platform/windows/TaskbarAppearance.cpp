@@ -425,7 +425,7 @@ bool TaskbarAppearance::apply(const QString& edge, bool detached, int transparen
 }
 bool TaskbarAppearance::applyMonitor(const QString& device, const QString& edge, bool detached, int transparency, int widthPercent, int thickness, bool islands, QString& error) {
     auto& d = *impl_;
-    if (transparency < 0 || transparency > 100 || thickness < (islands ? 64 : 48) || thickness > 96 ||
+    if (transparency < 0 || transparency > 100 || thickness < 48 || thickness > 96 ||
         widthPercent<40 || widthPercent>100 || (edge!="bottom" && edge!="top" && edge!="left" && edge!="right")) {
         error = QStringLiteral("Invalid monitor configuration."); return false;
     }

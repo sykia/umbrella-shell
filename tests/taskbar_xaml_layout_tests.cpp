@@ -82,6 +82,8 @@ void exerciseLayoutRequest() {
     request={};request.count=1;wcscpy_s(request.entries[0].id,L"start");
     require(validComponentLayout(request),"Known fixture selector rejected");
     request.entries[0].zone=3;
+    require(validComponentLayout(request),"Hidden component zone refused");
+    request.entries[0].zone=4;
     require(!validComponentLayout(request),"Unknown fixture zone accepted");
     request.entries[0].zone=0;request.count=2;request.entries[1]=request.entries[0];
     require(!validComponentLayout(request),"Duplicate fixture selector accepted");
@@ -412,6 +414,55 @@ void exerciseRepeaterContract() {
         SUCCEEDED(coordinated.report(S_OK).status),"New native application did not join the active coordinated model");
     checkLayoutIdentity();
     require(coordinated.reset(),"Geometry scenario did not release its original slots");
+    explorer::component_layout::Session hiding;
+    require(explorer::component_layout::ComponentLayoutFixture::bind(hiding,commonRoot,view,tray,priorLayout,customFactory,baseline,observedLayout,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Search},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},
+         {overflow,taskbar::Component::TrayOverflow},{input,taskbar::Component::InputIndicators},
+         {quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Hiding fixture failed to bind");
+    auto hiddenRequest=coordinatedRequest;
+    for(unsigned i=0;i<hiddenRequest.count;++i)if(!wcscmp(hiddenRequest.entries[i].id,L"start"))hiddenRequest.entries[i].zone=3;
+    const auto opacityOriginal=attachedFirst.Opacity();
+    commonRoot.Tag(winrt::box_value(.6));Data::Binding opacityBinding;opacityBinding.Source(commonRoot);opacityBinding.Path(PropertyPath(L"Tag"));
+    Data::BindingOperations::SetBinding(attachedFirst,UIElement::OpacityProperty(),opacityBinding);
+    const auto opacityBefore=attachedFirst.Opacity();const auto hitBefore=attachedFirst.IsHitTestVisible();
+    require(SUCCEEDED(hiding.configure(nullptr,hiddenRequest)),"Original component hide refused");
+    require(attachedFirst.Opacity()==0 && !attachedFirst.IsHitTestVisible() && !attachedFirst.IsEnabled() &&
+        Media::VisualTreeHelper::GetParent(attachedFirst)==view,"Hidden component still paints/hits or changed owner");
+    explorer::component_layout::ComponentLayoutFixture::settle(hiding);
+    require(SUCCEEDED(hiding.configure(nullptr,coordinatedRequest)),"Hidden component could not return to panel");
+    require(attachedFirst.Opacity()==opacityBefore && attachedFirst.IsHitTestVisible()==hitBefore,"Unhide did not restore original presentation");
+    explorer::component_layout::ComponentLayoutFixture::settle(hiding);
+    require(SUCCEEDED(hiding.configure(nullptr,hiddenRequest)) && hiding.reset(),"Hidden component reset failed");
+    require(attachedFirst.Opacity()==opacityBefore && attachedFirst.IsHitTestVisible()==hitBefore,"Reset left original component hidden");
+    require(attachedFirst.GetBindingExpression(UIElement::OpacityProperty())!=nullptr && attachedFirst.IsEnabled(),"Original binding/enabled state not restored");
+    attachedFirst.Opacity(opacityOriginal);
+    const auto originalWeatherWidth=attachedSecond.Width();const auto originalWeatherContent=attachedSecond.Content();
+    Controls::TextBlock weatherLabel;weatherLabel.Text(L"7 C");attachedSecond.Content(weatherLabel);attachedSecond.Width(216);
+    commonRoot.UpdateLayout();
+    explorer::component_layout::Session weatherSizing;
+    require(explorer::component_layout::ComponentLayoutFixture::bind(weatherSizing,commonRoot,view,tray,priorLayout,customFactory,baseline,observedLayout,
+        {{attachedFirst,taskbar::Component::Start},{attachedSecond,taskbar::Component::Widgets},{attachedThird,taskbar::Component::TaskView},
+         {attachedNew,taskbar::Component::Applications},{newApp,taskbar::Component::Applications},
+         {overflow,taskbar::Component::TrayOverflow},{input,taskbar::Component::InputIndicators},
+         {quick,taskbar::Component::QuickSettings},{clock,taskbar::Component::Clock}}),"Weather sizing fixture failed to bind");
+    auto weatherRequest=coordinatedRequest;
+    for(unsigned i=0;i<weatherRequest.count;++i)if(!wcscmp(weatherRequest.entries[i].id,L"search"))wcscpy_s(weatherRequest.entries[i].id,L"widgets");
+    // Production surfaces defer LayoutUpdated work until the owner has finished
+    // measuring. Exercise that same path rather than a nested fixture arrange.
+    taskbar::SurfaceSpec weatherSurface;weatherSurface.enabled=true;
+    const auto weatherStatus=weatherSizing.configure(nullptr,weatherRequest,{}, {},weatherSurface);
+    if(FAILED(weatherStatus))std::cerr<<"weather phase="<<weatherSizing.report(weatherStatus).failurePhase<<" item="<<weatherSizing.report(weatherStatus).failureItem<<" status="<<std::hex<<weatherStatus<<std::dec<<'\n';
+    require(SUCCEEDED(weatherStatus),"Measured weather sizing refused");
+    require(attachedSecond.ActualWidth()<216 && attachedSecond.ActualWidth()>=weatherLabel.ActualWidth(),
+        "Weather retained blank native width or cropped original text");
+    const auto compactWeatherWidth=attachedSecond.ActualWidth();
+    explorer::component_layout::ComponentLayoutFixture::settle(weatherSizing);
+    require(FAILED(weatherSizing.configure(nullptr,weatherRequest,{0,0,100,48},{},weatherSurface)) &&
+        SUCCEEDED(weatherSizing.report(S_OK).status) && std::abs(attachedSecond.ActualWidth()-compactWeatherWidth)<.5,
+        "Refused geometry lost the previous compact weather width");
+    require(weatherSizing.reset() && attachedSecond.Width()==216,"Weather width override did not restore");
+    attachedSecond.Width(originalWeatherWidth);attachedSecond.Content(originalWeatherContent);commonRoot.UpdateLayout();
     // Exercise the production mask writer, with real HRGN and composition clip,
     // on this private HWND. A failing writer mutates before reporting failure.
     explorer::component_layout::Session surfaceCoordinated;

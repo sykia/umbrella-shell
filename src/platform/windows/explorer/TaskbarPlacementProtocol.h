@@ -36,7 +36,7 @@ inline bool validComponentLayout(const ComponentLayoutRequest& request) noexcept
     for(unsigned i=0;i<request.count;++i) {
         const auto& entry=request.entries[i];
         const auto end=std::find(std::begin(entry.id),std::end(entry.id),L'\0');
-        if(end==std::end(entry.id) || entry.zone>2 || taskbar::componentFromId({entry.id,static_cast<size_t>(end-entry.id)})==taskbar::Component::Unknown)return false;
+        if(end==std::end(entry.id) || entry.zone>3 || taskbar::componentFromId({entry.id,static_cast<size_t>(end-entry.id)})==taskbar::Component::Unknown)return false;
         if(!wcscmp(entry.id,L"desktop")) {
             if(entry.zone!=2)return false;
             for(unsigned j=i+1;j<request.count;++j)if(request.entries[j].zone==2)return false;

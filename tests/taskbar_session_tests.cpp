@@ -6,6 +6,17 @@
 
 namespace umbrella::platform {
 struct TaskbarModuleSessionTest {
+    static bool hiddenDiscovery() {
+        const QString first=QStringLiteral("panel-one"),second=QStringLiteral("panel-two");
+        const QByteArray output="components-monitor panel-one\n  search type=Original bounds=(10,0,40,48) visible=1 hit=0\n"
+            "  start type=Original bounds=(50,0,40,48) visible=1 hit=1\n"
+            "components-monitor panel-two\n  search type=Original bounds=(10,0,40,48) visible=1 hit=0\n";
+        const auto ordinary=TaskbarModuleSession::decodeComponents(output,{});
+        const auto retained=TaskbarModuleSession::decodeComponents(output,{{first,{"search","widgets"}}});
+        return ordinary[first]==QStringList{"start"} && retained[first].contains("search") &&
+            !retained[first].contains("widgets") && !retained[second].contains("search");
+    }
+
     static bool placementReport(const QString& mode,bool preserved) {
         TaskbarModuleSession session;
         session.host_.setProgram(QCoreApplication::applicationFilePath());session.host_.setArguments({mode});session.host_.start();
@@ -77,7 +88,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     using umbrella::platform::TaskbarModuleSessionTest;
-    if (!TaskbarModuleSessionTest::monitorRefusal() || !TaskbarModuleSessionTest::placementReport("--slots-restored",true) ||
+    if (!TaskbarModuleSessionTest::hiddenDiscovery() || !TaskbarModuleSessionTest::monitorRefusal() || !TaskbarModuleSessionTest::placementReport("--slots-restored",true) ||
         !TaskbarModuleSessionTest::placementReport("--slots-uncertain",false) || !TaskbarModuleSessionTest::placementReport("--slots-geometry",false) ||
         !TaskbarModuleSessionTest::lossGeneration() || !TaskbarModuleSessionTest::response("--ack", true) ||
         !TaskbarModuleSessionTest::response("--refuse", false) ||

@@ -17,7 +17,7 @@ bool TaskbarModuleSession::available() {
     return QFileInfo::exists(hostPath()) && QFileInfo::exists(QCoreApplication::applicationDirPath() + "/UmbrellaTaskbarModule.dll");
 }
 bool TaskbarModuleSession::layoutAvailable() { return available() && explorer::native_layout::installedBuildSupported(); }
-QHash<QString,QStringList> TaskbarModuleSession::discoverComponents(QString& error) {
+QHash<QString,QStringList> TaskbarModuleSession::discoverComponents(QString& error,const QHash<QString,QStringList>& retainedHidden) {
     QHash<QString,QStringList> result;
     if(!layoutAvailable()){error=QStringLiteral("Сборка Explorer не поддерживает обнаружение компонентов.");return result;}
     QProcess probe;
@@ -26,14 +26,20 @@ QHash<QString,QStringList> TaskbarModuleSession::discoverComponents(QString& err
     if(!probe.waitForFinished(3000) || probe.exitStatus()!=QProcess::NormalExit || probe.exitCode()!=0){error=QStringLiteral("Не удалось получить состав панелей Explorer.");return result;}
     const auto output=probe.readAllStandardOutput();
     if(output.size()>65536){error=QStringLiteral("Слишком большой снимок компонентов.");return result;}
+    return decodeComponents(output,retainedHidden);
+}
+QHash<QString,QStringList> TaskbarModuleSession::decodeComponents(const QByteArray& output,const QHash<QString,QStringList>& retainedHidden) {
+    QHash<QString,QStringList> result;
+    if(output.size()>65536)return result;
     QString device;
     QHash<QString,QHash<QString,double>> positions;
-    const QRegularExpression item(QStringLiteral("^  ([a-z]+) .*bounds=\\(([-0-9.]+),([-0-9.]+),([0-9.]+),([0-9.]+)\\) visible=1 hit=1"));
+    const QRegularExpression item(QStringLiteral("^  ([a-z]+) .*bounds=\\(([-0-9.]+),([-0-9.]+),([0-9.]+),([0-9.]+)\\) visible=1 hit=([01])"));
     for(const auto& line:QString::fromUtf8(output).split('\n')) {
         if(line.startsWith("components-monitor ")){device=line.mid(19).trimmed();if(result.size()<16)result.insert(device,{});else device.clear();continue;}
         const auto match=item.match(line);
         if(device.isEmpty() || !match.hasMatch() || match.captured(4).toDouble()<=0 || match.captured(5).toDouble()<=0)continue;
         auto id=match.captured(1);
+        if(match.captured(6)=="0" && !retainedHidden.value(device).contains(id))continue;
         const auto wide=id.toStdWString();
         if(taskbar::componentFromId(wide)==taskbar::Component::Unknown)continue;
         auto& ids=result[device];

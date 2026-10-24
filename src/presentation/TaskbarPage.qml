@@ -13,7 +13,7 @@ Item {
     property real widthPercent: system ? system.widthPercent : 100
     readonly property string panelStyle: islands ? "islands" : detached ? "detached" : "attached"
     property int separateThickness: system && system.detached && !system.islands ? system.thickness : 48
-    property int islandThickness: system && system.islands ? system.thickness : 72
+    property int islandThickness: system && system.islands ? system.thickness : 48
     function selectStyle(style) {
         if (["attached","detached","islands"].indexOf(style) < 0) return
         if (style === "islands" && !widthAvailable) return
@@ -22,7 +22,7 @@ Item {
         if (panelStyle === "islands") islandThickness = thickness
         islands = style === "islands"
         detached = style !== "attached"
-        thickness = islands ? Math.max(64, islandThickness) : detached ? separateThickness : 48
+        thickness = islands ? Math.max(48, islandThickness) : detached ? separateThickness : 48
         if (islands) autoHide = false
         else if (autoHide) thickness = 48
         scheduleApply()
@@ -351,7 +351,7 @@ Item {
                         id: thicknessSlider
                         objectName: "taskbarThickness"
                         Layout.fillWidth: true; implicitHeight: 30
-                        from: page.islands ? 64 : 48; to: 96; stepSize: 2; value: page.thickness
+                        from: 48; to: 96; stepSize: 2; value: page.thickness
                         enabled: page.widthAvailable && !page.autoHide
                         opacity: enabled ? 1 : 0.35
                         onMoved: { page.thickness = Math.round(value); page.scheduleApply() }

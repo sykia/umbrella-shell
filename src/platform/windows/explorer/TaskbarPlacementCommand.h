@@ -29,7 +29,7 @@ inline bool parsePlacementCommand(std::string_view line,PlacementCommand& result
     for(auto word=token();!word.empty();word=token()) {
         if(result.request.count>=maxLayoutGroups)return false;
         const auto colon=word.find(':');
-        if(colon==word.npos || !colon || colon>=24 || word.size()!=colon+2 || word.back()<'0' || word.back()>'2')return false;
+        if(colon==word.npos || !colon || colon>=24 || word.size()!=colon+2 || word.back()<'0' || word.back()>'3')return false;
         auto& entry=result.request.entries[result.request.count++];entry.zone=word.back()-'0';
         for(size_t i=0;i<colon;++i){if(word[i]<'a' || word[i]>'z')return false;entry.id[i]=word[i];}
     }
