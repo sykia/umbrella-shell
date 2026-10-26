@@ -1,8 +1,12 @@
 [CmdletBinding()]
-param([string]$Installer = 'dist/UmbrellaShell-1.0.1-windows-x64-setup.exe')
+param([string]$Installer = '')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = Split-Path $PSScriptRoot -Parent
+$project = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
+if ($project -notmatch 'project\(UmbrellaShell VERSION (\d+\.\d+\.\d+)') { throw 'Project version missing.' }
+$version = $Matches[1]
+if (!$Installer) { $Installer = "dist/UmbrellaShell-$version-windows-x64-setup.exe" }
 $setup = (Resolve-Path -LiteralPath (Join-Path $root $Installer)).Path
 $installDir = Join-Path $env:ProgramFiles 'Umbrella Shell'
 $application = Join-Path $installDir 'UmbrellaShell.exe'
@@ -30,7 +34,7 @@ function Invoke-InstallerProcess([string]$Label, [string]$File, [string[]]$Argum
 $setupLog = Join-Path ([IO.Path]::GetTempPath()) 'umbrella-installer-test.log'
 Invoke-InstallerProcess 'setup' $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=$setupLog") $setupLog
 if (!(Test-Path -LiteralPath $application -PathType Leaf)) { throw "Installed executable missing: $application" }
-if ((Get-Item -LiteralPath $application).VersionInfo.ProductVersion -notlike '1.0.1*') { throw 'Installed version mismatch.' }
+if ((Get-Item -LiteralPath $application).VersionInfo.ProductVersion -notlike "$version*") { throw 'Installed version mismatch.' }
 
 $previousPath = $env:PATH
 try {
