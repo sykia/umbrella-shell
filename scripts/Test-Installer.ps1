@@ -49,7 +49,8 @@ if (Test-Path -LiteralPath $helper) {
 Invoke-InstallerProcess 'uninstall' $uninstaller @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
 if (Test-Path -LiteralPath $application) { throw 'Uninstall left the installed executable behind.' }
 foreach ($name in @('UmbrellaMenu', 'UmbrellaShell')) {
-    if ($null -ne (Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $name -ErrorAction SilentlyContinue)) {
+    $runKey = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+    if ($null -ne $runKey -and $runKey.PSObject.Properties.Name -contains $name) {
         throw "Uninstall left the $name autostart value behind."
     }
 }
