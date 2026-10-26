@@ -170,7 +170,10 @@ if(UMBRELLA_BUILD_APP)
         add_test(NAME taskbar_component_observer COMMAND UmbrellaTaskbarHost --fixture-inspect-components)
         set_tests_properties(taskbar_component_observer PROPERTIES TIMEOUT 15)
         add_test(NAME settings_ui_smoke COMMAND UmbrellaShell --ui-smoke)
-        set_tests_properties(settings_ui_smoke PROPERTIES TIMEOUT 20)
+        # Software-rendered/headless CI can spend well beyond the normal 4.2 s
+        # smoke sequence compiling the first QML scene. Keep the application's
+        # own pass/fail checks authoritative while retaining a bounded watchdog.
+        set_tests_properties(settings_ui_smoke PROPERTIES TIMEOUT 60)
         add_test(NAME host_diagnostics COMMAND UmbrellaShell --diagnostics)
         set_tests_properties(host_diagnostics PROPERTIES PASS_REGULAR_EXPRESSION "updatesEnabled.*false")
         add_test(NAME host_unknown_argument COMMAND UmbrellaShell --unknown)
