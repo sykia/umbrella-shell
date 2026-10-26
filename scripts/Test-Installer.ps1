@@ -8,14 +8,16 @@ $installDir = Join-Path $env:ProgramFiles 'Umbrella Shell'
 $application = Join-Path $installDir 'UmbrellaShell.exe'
 $uninstaller = Join-Path $installDir 'unins000.exe'
 
-function Invoke-InstallerProcess([string]$File, [string[]]$Arguments) {
+function Invoke-InstallerProcess([string]$File, [string[]]$Arguments, [string]$Log = '') {
     $process = Start-Process -FilePath $File -ArgumentList $Arguments -PassThru -Wait
     if ($null -eq $process.ExitCode -or $process.ExitCode -ne 0) {
+        if ($Log -and (Test-Path -LiteralPath $Log)) { Get-Content -LiteralPath $Log }
         throw "$File failed with exit code $($process.ExitCode)."
     }
 }
 
-Invoke-InstallerProcess $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-')
+$setupLog = Join-Path ([IO.Path]::GetTempPath()) 'umbrella-installer-test.log'
+Invoke-InstallerProcess $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/LOG=$setupLog") $setupLog
 if (!(Test-Path -LiteralPath $application -PathType Leaf)) { throw "Installed executable missing: $application" }
 if ((Get-Item -LiteralPath $application).VersionInfo.ProductVersion -notlike '1.0.1*') { throw 'Installed version mismatch.' }
 
