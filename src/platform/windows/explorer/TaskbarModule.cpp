@@ -481,12 +481,14 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
             const int extent = MulDiv(full, static_cast<int>(state->width), 100);
             RECT current{};
             GetWindowRect(hwnd, &current);
-            if (position->flags & SWP_NOMOVE) position->y = current.top;
+            APPBARDATA appbar{}; appbar.cbSize = sizeof(appbar);
+            const bool autoHide = (SHAppBarMessage(ABM_GETSTATE, &appbar) & ABS_AUTOHIDE) != 0;
+            if (position->flags & SWP_NOMOVE) { position->x = current.left; position->y = current.top; }
             if (position->flags & SWP_NOSIZE) position->cy = current.bottom - current.top;
             if (vertical) {
                 const int thickness = MulDiv(static_cast<int>(state->thickness), static_cast<int>(GetDpiForWindow(hwnd)), 96);
                 const int aligned = state->edge == 0 ? monitor.rcMonitor.left : monitor.rcMonitor.right - thickness;
-                position->x = aligned;
+                if (!autoHide) position->x = aligned;
                 position->y = monitor.rcMonitor.top + (full - extent) / 2;
                 position->cx = thickness;
                 position->cy = extent;
@@ -494,7 +496,7 @@ LRESULT CALLBACK subclass(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam,
                 const int thickness = MulDiv(static_cast<int>(state->thickness), static_cast<int>(GetDpiForWindow(hwnd)), 96);
                 position->x = monitor.rcMonitor.left + (full - extent) / 2;
                 const int aligned = state->edge == 1 ? monitor.rcMonitor.top : monitor.rcMonitor.bottom - thickness;
-                position->y = aligned;
+                if (!autoHide) position->y = aligned;
                 position->cx = extent;
                 position->cy = thickness;
             }

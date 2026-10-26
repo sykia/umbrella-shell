@@ -36,18 +36,6 @@ class Model(QObject):
     def resetAppearance(self):
         pass
 
-class DockModel(QObject):
-    changed = Signal()
-    def __init__(self):
-        super().__init__()
-        self.active = False
-    enabled = Property(bool, lambda self: self.active, notify=changed)
-    @Slot(bool, result=bool)
-    def setEnabled(self, value):
-        self.active = value
-        self.changed.emit()
-        return True
-
 def wait(milliseconds=260):
     loop = QEventLoop()
     QTimer.singleShot(milliseconds, loop.quit)
@@ -61,8 +49,6 @@ def main():
     app = QGuiApplication(["taskbar-live-ui-test", "-platform", "offscreen"])
     model = Model()
     engine = QQmlEngine()
-    dock = DockModel()
-    engine.rootContext().setContextProperty("dockSystem", dock)
     warnings = []
     engine.warnings.connect(lambda items: warnings.extend(item.toString() for item in items))
     path = Path(__file__).resolve().parents[1] / "src/presentation/TaskbarPage.qml"
@@ -126,15 +112,15 @@ def main():
     toggle.setProperty("checked", True)
     toggle.toggled.emit()
     wait()
-    require(page.property("widthPercent") == 100 and model.calls[-1][3] and model.calls[-1][4] == 100,
-            "Enabling autohide must explicitly use the supported full-width layout")
+    require(page.property("widthPercent") == 75 and model.calls[-1][3] and model.calls[-1][4] == 75,
+            "Enabling autohide must preserve the configured panel width")
     islands = page.findChild(QObject, "taskbarStyleIslands")
     require(islands is not None, "Grouped islands control must exist")
     islands.clicked.emit()
     wait()
-    require(page.property("islands") and not page.property("autoHide") and page.property("thickness") >= 64,
-            "Grouped islands require room for native content and explicitly disable incompatible autohide")
-    require(model.calls[-1][6] and model.calls[-1][5] >= 64, "Native adapter must receive islands and thickness together")
+    require(page.property("islands") and page.property("autoHide") and page.property("thickness") >= 48,
+            "Compact islands preserve the 48 DIP minimum and compatible autohide")
+    require(model.calls[-1][6] and model.calls[-1][5] >= 48, "Native adapter must receive islands and thickness together")
     for value in range(64, 85, 2):
         page.setProperty("thickness", value)
         page.scheduleApply()
@@ -171,16 +157,7 @@ def main():
     require(page.property("thickness") == 60, "Separate style retains its own height")
     for control in (attached, separate, islands):
         require(bool(control.property("selected")) == (control is separate), "Exactly one panel style must be selected")
-    dock.setEnabled(True)
-    previous = len(model.calls)
-    page.selectStyle("dock")
-    wait()
-    require(dock.active and page.property("panelStyle") == "detached" and len(model.calls) == previous,
-            "Dock must not be a Taskbar style")
-    attached.clicked.emit()
-    wait()
-    require(dock.active and page.property("panelStyle") == "attached" and len(model.calls) == previous + 1,
-            "Taskbar changes must work independently without disabling Dock")
+
     require(not warnings, "QML warnings: " + str(warnings))
     page.deleteLater()
     app.processEvents()

@@ -17,9 +17,10 @@ foreach ($argument in @('--diagnostics', '--ui-smoke')) {
         # Read ExitCode from the process object: GUI subsystem executables do not
         # reliably populate PowerShell LASTEXITCODE with a direct invocation.
         $process.WaitForExit()
+        $exitCode = $process.ExitCode
         Get-Content -LiteralPath $output
         Get-Content -LiteralPath $errors
-        if ($process.ExitCode -ne 0) { throw "Deployed application failed: $argument (exit $($process.ExitCode))" }
+        if ($null -eq $exitCode -or $exitCode -ne 0) { throw "Deployed application failed: $argument (exit $exitCode)" }
     } finally {
         if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output }
         if (Test-Path -LiteralPath $errors) { Remove-Item -LiteralPath $errors }

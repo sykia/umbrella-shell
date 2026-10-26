@@ -1,10 +1,48 @@
 # Проверки текущей версии
 
-Дата подготовки: 2026-10-19. Этот файл относится к текущей реализации системной
-панели, а не к удалённой Shell Bar. Версия CMake: 0.1.0.
+Дата подготовки релиза: 2026-10-26. Этот файл относится к текущей реализации
+системной панели и Clock Widgets, а не к удалённым Shell Bar, Dock или Music.
+Версия CMake: 1.0.0.
 
 ## Подтверждённые результаты
 
+26 октября, подготовка 1.0.0:
+
+- Выполнена свежая полная прямая сборка MSVC 14.42 и Qt 6.8.3 из текущих
+  исходников в отдельном каталоге. Собраны пять поставляемых EXE/DLL, GUI и
+  все локальные test targets; старые бинарники не переиспользовались.
+- Прошли policy, placement, snapshot protocol, location override, reorder,
+  session, menu patch, settings lifetime и recovery guard tests, а также
+  geometry/observer host fixtures и полный private-process Windows XAML fixture.
+- `UmbrellaShell.exe --diagnostics` подтвердил Qt 6.8.3, версию 1.0.0 и
+  отключённые обновления. `--ui-smoke` завершился с D3D11, blur и widgets,
+  312 кадрами, без QML warnings и graphics errors.
+- Исправлена устаревшая snapshot-проверка: одиночное размещение и zone 3
+  являются действующими операциями, тогда как zone 4 явно отвергается.
+- CMake preset, CTest, Qt deployment, Inno installer, staged public-index audit,
+  установка/удаление и GitHub CI будут записаны отдельно только после их
+  фактического выполнения. Чистая VM и Authenticode этим локальным прогоном не
+  подтверждены.
+
+23 октября, откат синхронизации сторон мониторов:
+автоматическое изменение сторон всех активных профилей удалено. Несовместимое
+сочетание сторон с вертикальной панелью отклоняется до изменений Windows и
+сброса компонентов. В ручной resume desktop test добавлена проверка сохранения
+геометрии и профилей при отказе. Независимый вертикальный перенос не подтверждён.
+Локальная MSVC/Qt-сборка приложения, deployment, UI smoke (код 0), native
+fixture, core policy/placement/reorder и `--exercise` resume desktop test
+прошли. Desktop report подтвердил independentEdgesRestored,
+mixedSideRefusedWithoutMovingPeers и passed; отдельный снимок после выхода
+подтвердил исходные панели 2560×48 снизу на обоих мониторах. Foundation и
+аудит публичного индекса также прошли; публикация не выполнялась.
+
+Локальный эксперимент с per-window native setters: геометрия вторичного экрана
+менялась отдельно на left/right/bottom, но проверки приложения/трея на толщине
+72 DIP не прошли. Расширение с фиксированным размером XAML вызвало зависание
+Explorer; затем Explorer самостоятельно перезапустился (завершение процесса
+командой не выполнялось). Экспериментальные исходники удалены, изменения native
+модуля и visual layout откачены. Этот вариант не поставляется пользователю.
+Python QML-проверка недоступна: в runtime нет PySide6. Другие DLL/DPI не проверены.
 22 октября, расширение трея до четырёх оригинальных групп:
 
 - Полная прямая сборка MSVC 14.42/Qt 6.8.3 через Build-Local, deployment Qt и
@@ -68,7 +106,7 @@ private +532 КиБ, working set +52 КиБ, handles/threads 0; фоновые �
 
 Полная MSVC/Qt 6.8.3 сборка `build/taskbar-reorder` успешна, после найденного
 restore-дефекта затронутые GUI/host/test targets пересобраны точечно. Core reorder,
-placement, XAML, IPC/session, snapshot protocol, geometry и Dock isolated fixtures
+placement, XAML, IPC/session, snapshot protocol, geometry и изолированные fixtures
 прошли. Qt runtime/QML plugins развёрнуты локально, diagnostics этой сборки прошёл.
 Первоначально отсутствовавшие Qt6Test/qoffscreen для quiet-fixture добавлены из того
 же Qt SDK. Установка, release, вход в Windows, реальные popup/контекстные меню,
@@ -109,7 +147,7 @@ mock-backend и software renderer, без Explorer, системного вво�
 Protocol tests проверили отказ v1/v2 у host v3, неверные owner IDs/depth/index и
 отсутствие пригодной привязки после отказа. Полная MSVC/Qt 6.8.3 сборка
 `Build-Local.ps1 -Output build/reorder-owner`, core reorder, placement, session,
-Dock isolated fixture и host `--fixture` прошли. Foundation и public index audit
+Host `--fixture` прошли. Foundation и public index audit
 успешны.
 Это не desktop-проверка: новые снимки/переносы в Explorer не запускались;
 задержка native apply и ресурсы Explorer не измерялись.
@@ -121,7 +159,7 @@ Dock isolated fixture и host `--fixture` прошли. Foundation и public ind
 Системный WinUI 2 CBS ItemsRepeater в собственном offscreen HWND прошёл тот же
 native-адаптер: порядок/восстановление, исходные Click через automation Invoke,
 добавление/закрытие элемента и отказ от перезаписи reentrant-вставки. Snapshot
-protocol, placement, session, Dock isolated fixture и host `--fixture` также прошли.
+protocol, placement, session, Host `--fixture` также прошли.
 Core planner: 1000 планов по 64 объекта — 20–24 мс в двух запусках; это не время
 модельной транзакции или drag/drop. Explorer не подключался, его ресурсы/задержки
 не измерялись, дополнительные компоненты настоящей панели не объявлены готовыми.
@@ -405,22 +443,116 @@ Foundation и аудит текущего индекса (267 файлов) пр
 при установке не выполнялись. Эти результаты уточняют предыдущие записи
 «установка не выполнялась». Нового релиза и публикации нет.
 
-## Локальное объединение Reorder и Dock — 21 октября 2026
 
-В main перенесены три коммита этапов Taskbar Reorder (512804e, 80c687e, eb0e09a)
-с сохранением ранее интегрированного Dock. Конфликты CMake, Build-Local и Unreleased
-разрешены сохранением обоих наборов целей/записей; модуль Dock не заменялся.
+## Оформление настроек — 23 октября 2026
 
-Свежая полная прямая сборка MSVC 14.42 / Qt 6.8.3 через Build-Local.ps1 прошла
-для объединённого GUI, native-модулей и fixtures. Прошли Reorder placement/planner,
-mock IPC, XAML layout-slot fixture в собственном offscreen tool HWND, Dock policy,
-mock DWM ownership и изолированный Dock model/persistence/QML fixture. Также прошли
-menu patch, policy, settings lifetime, geometry fixture с собственным HWND,
-diagnostics и обе PySide6-проверки конфигурации/навигации. Foundation и аудит
-объединённого staged index прошли; AGENTS.md отсутствует в индексе.
+Новая палитра и стартовая страница проверены четырьмя QML-тестами:
+`taskbar_navigation_ui_test.py`, `settings_theme_ui_test.py`,
+`taskbar_live_ui_test.py`, `taskbar_configuration_ui_test.py` (PySide6 6.8.3).
+Проверены уведомления смены светлой/тёмной/контрастной палитры и акцента
+с fake backend, навигация 800×560, отсутствие записей при навигации,
+существующие drag/drop, coalescing и rollback. Предупреждений QML нет.
+Локально собранный MSVC/Qt 6.8.3 GUI прошёл `--ui-smoke`: D3D11,
+системный blur, первый кадр и загрузка ресурсов; exit 0.
+Test-Foundation и аудит существующего индекса Test-PublicRepository прошли.
+Реальная смена темы Windows, новый installer, VM и CI этой правки не проверены.
 
-Реальный Explorer, системная панель и установленная копия не изменялись.
-Полноценный Reorder не заявляется готовым: GUI по-прежнему разрешает прежний
-сценарий Task View, а новый layout-slot adapter используется только fixture.
-CMake presets, installer, подпись, VM и новые desktop/resource-проверки этого
-объединения не выполнялись; push/релиз не делались, нового CI-прогона нет.
+
+## Удаление виджетов рабочего стола — 24 октября 2026
+
+Удалены редактор, часы, календарь, медиасессия, WASAPI/FFT, ресурсы и отдельные
+проверки виджетов, подключения в CMake и Build-Local. Системная кнопка Widgets
+по-прежнему распознаётся конструктором Taskbar.
+
+Прямая сборка Build-Local.ps1 завершилась с MSVC и Qt 6.8.3. Прошли Foundation,
+проверка публичного Git-индекса, policy, mock DWM ownership/error paths
+и QML navigation (загрузка Settings, страницы, навигация, размер 800×560).
+Это не проверка установки или рабочего стола; CMake presets/ctest не запускались.
+
+## Настройки Fluent 2 — 24 октября 2026
+
+- MSVC 2022 / Qt 6.8.3: `scripts/Build-Local.ps1`, каталог
+  `build/settings-fluent-final-20261024`; после финальной правки QML ресурсы
+  пересобраны и приложение перелинковано тем же компилятором.
+- `--ui-smoke`: код 0, D3D11, native backdrop включён, снимок окна проверен.
+  Короткий запуск: sampled peak working set 144.7 MiB, CPU 1.25 s.
+  Это не длительный idle/GPU benchmark.
+- `taskbar_navigation_ui_test.py`: старт, переходы, навигация, 800×560,
+  отсутствие QML warnings и запросов изменения Taskbar.
+- `settings_theme_ui_test.py`: light/dark/accent/high contrast, reduced motion,
+  прозрачность при native backdrop и непрозрачные fallback-состояния.
+
+
+Физическое переключение системной темы/прозрачности, отказ DWM и резервный Acrylic
+на другой сборке Windows не воспроизводились: fallback-политика проверена на уровне
+QML, а успешный native material — на текущей Windows. CMake presets, installer,
+VM, подпись, публикация и CI в рамках изменения интерфейса не выполнялись.
+
+
+## Удаление отдельной панели приложений — 24 октября 2026
+
+Удалены собственные окна панели, модель приложений/закреплений, preview/DWM
+thumbnail, страница и навигация, восстановление режима при входе, сборочные
+цели и отдельные fixtures. Системная тема выделена в SystemTheme с событийным
+обновлением; Taskbar и Widgets используют прежние общие настройки и контролы.
+
+Четыре PySide6 6.8.3 проверки (navigation, settings theme, live UI,
+configuration UI) прошли без QML warnings и запросов изменения Taskbar.
+Полная прямая сборка scripts/Build-Local.ps1 завершилась успешно (MSVC, Qt 6.8.3),
+каталог build/without-panel-01. Свежий GUI прошёл --ui-smoke: exit 0, frames=265,
+blur=1, d3d11=1. Пройдены policy, placement, location override, reorder,
+private-process XAML, mock session, menu patch, recovery guard и settings lifetime fixtures.
+Foundation, аудит существующего индекса и diff --check прошли. Индекс не
+обновлялся; аудит индекса не проверяет незакоммиченные изменения.
+
+Snapshot protocol fixture завершился с «Malformed/legacy placement command
+accepted»: его исходник, TaskbarPlacementCommand.h и TaskbarModuleProtocol.h
+не отличаются от HEAD. Это существующее отдельное падение; протокол не менялся.
+CMake presets/CTest, installer, VM, физическая смена темы и CI не запускались.
+Установленная копия и рабочая сессия оформления не обновлялись.
+
+## Widgets desktop layers — 24 October 2026
+
+Local MSVC 2022 / Qt 6.8.3 build and isolated D3D11/QML smoke passed. Existing
+smoke additionally verifies unchanged layout across editor toggles and persisted
+resize dimensions with rejection of non-finite input. Read-only inspection on
+two 2560×1440 / 100% DPI screens confirmed six saved widget HWNDs parented to
+Progman below SHELLDLL_DefView and above its wallpaper WorkerW. Explorer was
+not restarted. Legacy hosts, mixed DPI, virtual desktops, Show Desktop and
+Explorer restart/hot-plug recovery remained manual checks. This section records
+the removed implementation and is not a claim about the current build.
+
+Follow-up desktop check: reopening monitor 2 showed the three current saved
+Clock/Music visuals above Acrylic; Done restored visible HWNDs below icons
+with original coordinates. Widgets.ini hash stayed unchanged. The separate
+Music control window showed the active session. Final local rebuild and
+D3D11/QML smoke passed again after native style read-back validation was fixed.
+Five-second whole-GUI/live-media sample: 218.75 ms CPU, 167.4 MiB working set,
+1884 to 1885 handles; this does not measure adapter-only cost or GPU use.
+
+## Widgets reset and editor refresh — 25 October 2026
+
+Clock and Music implementations were removed. The current editor creates no
+widget windows, media sessions or network requests. Its smoke coverage checks
+the nine-item concept catalog, monitor-specific opening, selection, closing and
+reopening. Local MSVC 2022 / Qt 6.8.3 compilation passed. UI smoke passed with
+317 frames, D3D11, native editor blur, no QML warnings and no scene-graph error.
+The captured 2560×1440 editor was visually inspected. Foundation and public-index
+audits passed; installer, VM, mixed-DPI desktop and CI checks were not run.
+
+## Clock rebuild — 25 October 2026
+
+The new Clock implementation compiled with local MSVC 2022 and Qt 6.8.3. The
+isolated UI smoke created inline and stacked blur clocks, opened the selected
+instance settings and passed with 313 frames, D3D11, native editor blur, no QML
+warnings and no scene-graph error. The 2560×1440 editor capture was inspected:
+both layouts, color swatches, style controls and interval sliders were visible.
+The smoke deliberately does not attach windows to Explorer. Live icon-layer,
+mixed-DPI, virtual-desktop, long idle CPU/GPU and resume behavior remain manual
+checks; installer, VM and CI were not run.
+
+Follow-up style split: `empty`, `blur-card` and `blur-digits` passed the isolated
+smoke with 314 frames, D3D11, no QML warnings and no scene-graph error. The
+capture confirmed the full-card and glyph-only masks plus the three-option
+settings row. Existing `white`/`blur` layoutV2 values migrate to `empty`/
+`blur-card`. Explorer attachment and sustained resource use remain manual checks.

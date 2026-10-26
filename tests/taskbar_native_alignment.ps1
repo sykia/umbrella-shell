@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$HostPath)
+param([Parameter(Mandatory)][string]$HostPath, [string]$MonitorDevice = '')
 $ErrorActionPreference = 'Stop'
 # Opt-in desktop test. Temporarily changes Taskbar; EOF restores the session.
 Add-Type -AssemblyName UIAutomationClient
@@ -11,6 +11,12 @@ public static class UmbrellaAlignmentProbe {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct MonitorInfo {
+        public int Size; public Rect Monitor, Work; public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string Device;
+    }
+    [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd,uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 }
 '@
 $windows = @()
@@ -29,6 +35,12 @@ function Read-Geometry([IntPtr]$Window) {
 }
 $before = @{}
 foreach ($window in $windows) { $before[$window] = Read-Geometry $window }
+$targets = @($windows | Where-Object {
+    $info = [UmbrellaAlignmentProbe+MonitorInfo]::new(); $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+    if (-not [UmbrellaAlignmentProbe]::GetMonitorInfo([UmbrellaAlignmentProbe]::MonitorFromWindow($_,2),[ref]$info)) { throw 'Monitor unavailable' }
+    -not $MonitorDevice -or $info.Device -eq $MonitorDevice
+})
+if (-not $targets.Count) { throw 'Requested monitor has no taskbar' }
 $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = (Resolve-Path -LiteralPath $HostPath).Path
 $start.Arguments = '--serve'
@@ -54,14 +66,23 @@ $failure = $null
 try {
     if (-not $process.Start()) { throw 'Native host did not start' }
     Expect-Line 'ready'
-    foreach ($case in @(@(3,72),@(3,96),@(1,72),@(0,72),@(2,72),@(3,48))) {
-        $edge,$thickness = $case
-        $islands = [int]($thickness -ge 64)
-        $command = "75 $edge $thickness $islands"
+    # Test actual style flags, including transitions from islands to detached
+    # and attached on each side. Thickness alone does not select a style.
+    $cases = foreach ($style in @('islands','detached','attached')) {
+        foreach ($edge in @(3,0,2,1,3)) {
+            [pscustomobject]@{ Edge=$edge; Thickness=$(if ($style -eq 'attached') {48} else {72});
+                Islands=[int]($style -eq 'islands'); Detached=[int]($style -ne 'attached');
+                Percent=$(if ($style -eq 'attached') {100} else {75}); Style=$style }
+        }
+    }
+    foreach ($case in $cases) {
+        $edge,$thickness = $case.Edge,$case.Thickness
+        $command = "$($case.Percent) $edge $thickness $($case.Islands) $($case.Detached)"
+        if ($MonitorDevice) { $command += " $MonitorDevice" }
         $process.StandardInput.WriteLine($command)
         $process.StandardInput.Flush()
         Expect-Line "applied $command"
-        foreach ($window in $windows) {
+        foreach ($window in $targets) {
             $verified = $false
             for ($attempt = 0; $attempt -lt 15; ++$attempt) {
                 $root = [System.Windows.Automation.AutomationElement]::FromHandle($window)
@@ -86,10 +107,22 @@ try {
                 Start-Sleep -Milliseconds 80
             }
             if (-not $verified) { throw "Native content and frame disagree: edge=$edge thickness=$thickness" }
+            $info = [UmbrellaAlignmentProbe+MonitorInfo]::new(); $info.Size = [Runtime.InteropServices.Marshal]::SizeOf($info)
+            if (-not [UmbrellaAlignmentProbe]::GetMonitorInfo([UmbrellaAlignmentProbe]::MonitorFromWindow($window,2),[ref]$info)) { throw 'Monitor unavailable' }
+            $reserved = @(($info.Work.Left-$info.Monitor.Left),($info.Work.Top-$info.Monitor.Top),
+                ($info.Monitor.Right-$info.Work.Right),($info.Monitor.Bottom-$info.Work.Bottom))
+            for ($side=0; $side -lt 4; ++$side) {
+                $expectedReservation = if ($side -eq $edge) { $expected } else { 0 }
+                if ([Math]::Abs($reserved[$side]-$expectedReservation) -gt 1) { throw "Work area mismatch: edge=$edge reserved=$reserved expected=$expected" }
+            }
         }
-        "Verified edge=$edge thickness=$thickness"
+        foreach ($window in $windows) {
+            if ($targets -contains $window) { continue }
+            if (Compare-Object $before[$window] (Read-Geometry $window) -SyncWindow 0) { throw 'Independent edit moved another taskbar' }
+        }
+        "Verified style=$($case.Style) edge=$edge thickness=$thickness"
     }
-    'Passed: native app/tray centers match panel geometry at 48/72/96 DIP on all four edges.'
+    'Passed: native app/tray centers match panel geometry for islands, detached and attached on all four edges.'
 } catch {
     $failure = $_
     Write-Host "Alignment check failed: $_"

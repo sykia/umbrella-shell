@@ -35,7 +35,9 @@ foreach ($file in @('README.md','CHANGELOG.md','docs/ARCHITECTURE.md','docs/SETT
 $inventory = @(Get-ChildItem -LiteralPath $runtime -Recurse -File | Where-Object { $_.Extension -in @('.exe','.dll') } | Sort-Object FullName | ForEach-Object {
     @{ path = [IO.Path]::GetRelativePath($runtime,$_.FullName).Replace('\','/'); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); product = $_.VersionInfo.ProductName; fileVersion = $_.VersionInfo.FileVersion }
 })
-@{ version = '0.1.0'; signed = $false; buildKind = 'local-msvc-qt'; files = $inventory } | ConvertTo-Json -Depth 5 |
+$versionSource = Get-Content -LiteralPath (Join-Path $project 'CMakeLists.txt') -Raw
+if ($versionSource -notmatch 'project\(UmbrellaShell VERSION (\d+\.\d+\.\d+)') { throw 'Missing project version.' }
+@{ version = $Matches[1]; signed = $false; buildKind = 'local-msvc-qt'; files = $inventory } | ConvertTo-Json -Depth 5 |
     Set-Content -LiteralPath (Join-Path $runtime 'docs/runtime-inventory.json') -Encoding utf8
 $files = @(Get-ChildItem -LiteralPath $runtime -Recurse -File | Sort-Object FullName | ForEach-Object {
     @{ path = [IO.Path]::GetRelativePath($runtime,$_.FullName); sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }

@@ -90,14 +90,16 @@ def main():
     root.setHeight(root.implicitHeight())
     view.resize(900,1100); view.show(); QTest.qWait(150)
     def config(): return root.property("configuration").toVariant()
-    def item(name):
+    def find_item(name):
         def walk(node):
             if node.objectName() == name: return node
             for child in node.childItems():
                 found = walk(child)
                 if found is not None: return found
             return None
-        found = walk(root)
+        return walk(root)
+    def item(name):
+        found = find_item(name)
         require(found is not None, "missing " + name)
         return found
     def center(obj):
@@ -119,10 +121,15 @@ def main():
     initial = config()
     require(not backend.calls,"opening must not write Windows")
     # Native-discovered components can be hidden in the catalogue and returned.
+    require(find_item("component_power") is None and find_item("component_pen") is None,
+            "components absent from the native monitor snapshot were advertised")
     drag("search","available",0)
     require("search" in config()["available"],"active component could not be hidden")
     drag("search","center",1)
     require("search" in config()["center"],"hidden component could not return to panel")
+
+    gap = item("configurationGap")
+    require(gap is not None and gap.property("enabled"), "spacing is disabled for a supported native layout")
     backend.calls.clear();backend.drafts.clear()
     # Unsupported components cannot begin a drag or change the saved state.
     source = center(item("component_desktop"))

@@ -7,13 +7,19 @@ void require(bool value,const char* message){ if(!value){std::cerr<<message<<'\n
 int main(){
     PlacementCommand command;
     require(parsePlacementCommand("slots \\\\.\\DISPLAY1 8 start:0 clock:2\n",command) && command.request.count==2,"Bounded placement command rejected");
+    require(parsePlacementCommand("slots \\\\.\\DISPLAY1 8 clock:0\n",command) && command.request.count==1,"Single supported component rejected");
+    require(parsePlacementCommand("slots \\\\.\\DISPLAY1 8 start:3\n",command) && command.request.entries[0].zone==3,"Hidden component rejected");
     require(parsePlacementCommand("slots \\\\.\\DISPLAY2 reset\n",command) && !command.request.count,"Explicit placement reset rejected");
     require(parsePlacementCommand("slots-status \\\\.\\DISPLAY1\n",command) && command.statusOnly,"Read-only placement status rejected");
     for(const auto bad:{"layout \\\\.\\DISPLAY1 probe\n","slots \\\\.\\DISPLAY1 8\n","slots \\\\.\\DISPLAY1 8 start:0 start:1\n",
-        "slots \\\\.\\DISPLAY1 8 start:3\n","slots \\\\.\\DISPLAY1 97 start:0\n","slots \\\\.\\DISPLAY1 8 invalid:0\n",
+        "slots \\\\.\\DISPLAY1 8 start:4\n","slots \\\\.\\DISPLAY1 97 start:0\n","slots \\\\.\\DISPLAY1 8 invalid:0\n",
         "slots \\\\.\\DISPLAY1 8 desktop:0\n","slots \\\\.\\DISPLAY1 8 desktop:2 clock:2\n",
-        "slots \\\\.\\DISPLAYX 8 start:0\n","slots \\\\.\\DISPLAY1 reset clock:0\n","slots-status \\\\.\\DISPLAY1 extra\n",
-        "slots \\\\.\\DISPLAY1 8 clock:0"})require(!parsePlacementCommand(bad,command),"Malformed/legacy placement command accepted");
+        "slots \\\\.\\DISPLAYX 8 start:0\n","slots \\\\.\\DISPLAY1 reset clock:0\n","slots-status \\\\.\\DISPLAY1 extra\n"}) {
+        if(parsePlacementCommand(bad,command)) {
+            std::cerr<<"Malformed/legacy placement command accepted: "<<bad;
+            return 1;
+        }
+    }
     ComponentLayoutRequest request;
     request.flags=1;require(!validComponentLayout(request),"Retired layout replacement probe reached native placement");
     request={};request.version=2;require(!validComponentLayout(request),"Unknown native placement version accepted");

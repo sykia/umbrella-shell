@@ -1,8 +1,9 @@
-#pragma once
+﻿#pragma once
 
 class QWindow;
 
 namespace umbrella::platform {
-// Applies the untinted system blur-behind to this window only. False keeps the opaque QML fallback.
-bool applyWindowBackdrop(QWindow& window);
+// Default: documented Windows Mica. acrylic=true: clear native blur compatibility
+// path, then system Acrylic/opaque fallbacks. Call on theme/effects changes.
+bool applyWindowBackdrop(QWindow& window, bool enabled = true, bool dark = false, bool acrylic = false);
 }

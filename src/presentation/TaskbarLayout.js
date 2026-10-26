@@ -32,6 +32,12 @@ var catalog = [
     {id:"remote", label:"Удалённый сеанс / запись экрана", zone:"right"}
 ]
 function component(id) { return catalog.filter(function(c) { return c.id === id })[0] }
+// Keep the persisted layout complete, but do not advertise hardware/Windows
+// features which the native snapshot did not find on this monitor.
+function visibleComponents(items, ids) {
+    if (!Array.isArray(ids)) return items
+    return items.filter(function(id) { return ids.indexOf(id) >= 0 })
+}
 function movementBlocker(id, primary, available) {
     if (!available) return "Нужны совместимые системные DLL и native-host рядом с приложением."
     if (id === "desktop") return "Показать рабочий стол сохраняет крайний правый слот."

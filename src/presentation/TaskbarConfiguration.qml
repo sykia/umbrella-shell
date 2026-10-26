@@ -6,6 +6,7 @@ import "TaskbarLayout.js" as LayoutModel
 
 Rectangle {
     id: editor
+    SettingsTheme { id: theme }
     objectName: "taskbarConfiguration"
     property var scrollTarget
     property real sceneX:0
@@ -31,10 +32,9 @@ Rectangle {
     property real pointerY: 0
     property string feedback: ""
     readonly property bool nativeAvailable: !!(system && system.componentPlacementAvailable && monitor)
-    readonly property string applyScenario: LayoutModel.taskViewPlacement(configuration)
-    readonly property color accent: "#e7131b"
+    readonly property color accent: theme.accent
     implicitHeight: body.implicitHeight + 24
-    radius: 16; color: "#12ffffff"
+    radius: 8; color: theme.card; border.width: 1; border.color: theme.line
     function currentConfiguration() {
         var live = system && system.activeComponentConfigurations !== undefined && monitor
             ? system.activeComponentConfigurations[monitor.id] : system && system.activeComponentMonitor === (monitor ? monitor.id : "") ? system.activeComponentConfiguration : null
@@ -159,14 +159,14 @@ Rectangle {
             }
         }
     }
-    component ActionButton: Button {
+    component ActionButton: FluentButton {
         id:action
-        font.family:"Segoe UI"; font.pixelSize:11; implicitHeight:34; hoverEnabled:true
-        background:Rectangle { radius:9; color:action.down ? "#40ffffff" : action.hovered ? "#30ffffff" : "#18ffffff" }
-        contentItem:Text { text:action.text; font:action.font; color:"white"; opacity:action.enabled ? 1 : 0.35; horizontalAlignment:Text.AlignHCenter; verticalAlignment:Text.AlignVCenter }
+        font.family:"Segoe UI Variable"; font.pixelSize:11; implicitHeight:34; hoverEnabled:true
+        background:Rectangle { radius:9; color:action.down ? theme.hover : action.hovered ? theme.hover : theme.card }
+        contentItem:Text { text:action.text; font:action.font; color:theme.ink; opacity:action.enabled ? 1 : 0.35; horizontalAlignment:Text.AlignHCenter; verticalAlignment:Text.AlignVCenter }
     }
     component Label: Text {
-        color:"white"; font.family:"Segoe UI"; font.pixelSize:12
+        color:theme.ink; font.family:"Segoe UI Variable"; font.pixelSize:12
         wrapMode: Text.WordWrap
     }
     component Chip: Rectangle {
@@ -178,10 +178,10 @@ Rectangle {
         objectName: "component_" + componentId
         readonly property bool movable: knownHere && LayoutModel.movable(componentId) && editor.nativeAvailable && !editor.applying
         height: 52; radius:10
-        color: mouse.pressed ? "#40ffffff" : mouse.containsMouse ? "#28ffffff" : "#15ffffff"
-        border.width: 1; border.color: "#20ffffff"
+        color: mouse.pressed ? theme.hover : mouse.containsMouse ? theme.hover : theme.card
+        border.width: 1; border.color: theme.soft
         opacity: editor.dragId && LayoutModel.dragIds(editor.dragId).indexOf(componentId)>=0 ? 0 : 1
-        Behavior on color { ColorAnimation { duration:120 } }
+        Behavior on color { ColorAnimation { duration: theme.animations ? 120 : 0 } }
         Column {
             anchors.left:parent.left; anchors.leftMargin:36; anchors.right:parent.right; anchors.rightMargin:9; anchors.verticalCenter:parent.verticalCenter; spacing:2
             Label { width:parent.width; text:chip.info.label; font.pixelSize:11; maximumLineCount:1; elide:Text.ElideRight }
@@ -194,7 +194,7 @@ Rectangle {
         Text {
             x:10; anchors.verticalCenter:parent.verticalCenter
             visible:chip.componentId !== "start"
-            font.family:"Segoe MDL2 Assets"; font.pixelSize:18; color:"white"; opacity:chip.movable ? 1 : 0.45
+            font.family:"Segoe MDL2 Assets"; font.pixelSize:18; color:theme.ink; opacity:chip.movable ? 1 : 0.45
             text: ({widgets:"\uE80A",start:"\uE782",search:"\uE721",taskview:"\uE7C4",apps:"\uE71D",clock:"\uE787",volume:"\uE767",network:"\uE701",input:"\uE8D2"})[chip.componentId] || "\uE713"
         }
         Item {
@@ -202,7 +202,7 @@ Rectangle {
             visible:chip.componentId === "start"; opacity:0.45
             Repeater {
                 model:4
-                Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:"white" }
+                Rectangle { required property int index; x:(index % 2)*9; y:Math.floor(index/2)*9; width:7; height:7; color:theme.ink }
             }
         }
         ToolTip.text: chip.movable ? "Перенос исходного компонента; сеть и громкость вместе. Нужна совместимая горизонтальная панель без автоскрытия." : !chip.knownHere ? "Компонент не найден на этом мониторе. Включите его в Windows и обновите состав." : LayoutModel.movementBlocker(componentId,
@@ -242,8 +242,8 @@ Rectangle {
                     objectName:"configurationMonitor_" + index
                     enabled:!editor.applying && !editor.queuedConfiguration
                     background:Rectangle {
-                        radius:10; color:index === editor.monitorIndex ? editor.accent : "#18ffffff"
-                        Behavior on color { ColorAnimation { duration:160 } }
+                        radius:10; color:index === editor.monitorIndex ? editor.accent : theme.card
+                        Behavior on color { ColorAnimation { duration: theme.animations ? 160 : 0 } }
                     }
                     onClicked:editor.monitorIndex=index
                     ToolTip.visible:hovered; ToolTip.text:modelData.label
@@ -254,18 +254,18 @@ Rectangle {
         Label { text:"Компоненты"; opacity:0.65; font.pixelSize:11 }
         Rectangle {
             id:availableArea; objectName:"configurationAvailable"; Layout.fillWidth:true; implicitHeight:84
-            color:editor.validDrop && editor.hoverZone === "available" ? "#30e7131b" : "#10ffffff"; radius:9
-            border.color:editor.validDrop && editor.hoverZone === "available" ? editor.accent : "#15ffffff"
+            color:editor.validDrop && editor.hoverZone === "available" ? theme.tint : theme.card; radius:9
+            border.color:editor.validDrop && editor.hoverZone === "available" ? editor.accent : theme.card
             Flickable {
                 anchors.fill:parent; anchors.margins:8; clip:true; contentWidth:catalogRow.width; contentHeight:height
                 flickableDirection:Flickable.HorizontalFlick
                 Row {
                     id:catalogRow; spacing:6
                     Repeater {
-                        model:editor.configuration.available
+                        model:LayoutModel.visibleComponents(editor.configuration.available,editor.actualIds)
                         Chip { required property string modelData; componentId:modelData; width:168; inCatalog:true }
                     }
-                    Label { visible:editor.configuration.available.length === 0; text:"Все компоненты размещены. Перетащите сюда для скрытия."; width:300; height:52; verticalAlignment:Text.AlignVCenter }
+                    Label { visible:LayoutModel.visibleComponents(editor.configuration.available,editor.actualIds).length === 0; text:"Все доступные компоненты размещены. Перетащите сюда для скрытия."; width:330; height:52; verticalAlignment:Text.AlignVCenter }
                 }
                 ScrollBar.horizontal: ScrollBar { }
             }
@@ -282,12 +282,12 @@ Rectangle {
                     objectName:"configuration_" + zoneKey
                     Layout.fillWidth:true; Layout.alignment:Qt.AlignTop
                     implicitHeight:Math.max(160,cards.implicitHeight+54)
-                    radius:10; color:editor.validDrop && editor.hoverZone === zoneKey ? "#20e7131b" : "#0dffffff"
-                    border.color:editor.validDrop && editor.hoverZone === zoneKey ? editor.accent : "#20ffffff"
+                    radius:10; color:editor.validDrop && editor.hoverZone === zoneKey ? theme.tint : theme.soft
+                    border.color:editor.validDrop && editor.hoverZone === zoneKey ? editor.accent : theme.soft
                     Label { x:10; y:12; text:zone.modelData.label; font.weight:Font.DemiBold }
                     Column {
                         id:cards; x:8; y:42; width:parent.width-16
-                        move:Transition { NumberAnimation { properties:"y"; duration:140; easing.type:Easing.OutCubic } }
+                        move:Transition { NumberAnimation { properties:"y"; duration: theme.animations ? 140 : 0; easing.type:Easing.OutCubic } }
                         Repeater {
                             id:cardRepeater; model:editor.configuration[zone.zoneKey]
                             Column {
@@ -301,12 +301,14 @@ Rectangle {
                                     width:parent.width
                                     height:!slot.source && editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === slot.insertionIndex ? 58 : 0
                                     color:"transparent"; clip:true
-                                    Behavior on height { NumberAnimation { duration:110 } }
+                                    Behavior on height { NumberAnimation { duration: theme.animations ? 110 : 0 } }
                                     Rectangle { anchors.centerIn:parent; width:parent.width; height:3; radius:1; color:editor.accent }
                                 }
                                 Item {
-                                    width:parent.width; height:slot.source ? 0 : 58
-                                    Behavior on height { NumberAnimation { duration:110; easing.type:Easing.OutCubic } }
+                                    // Do not collapse the MouseArea which owns the
+                                    // active pointer grab. The chip itself becomes
+                                    // transparent while the drag is in progress.
+                                    width:parent.width; height:58
                                     Chip { componentId:slot.modelData; width:parent.width }
                                 }
                             }
@@ -315,7 +317,7 @@ Rectangle {
                             width:parent.width
                             height:editor.validDrop && editor.hoverZone === zone.zoneKey && editor.hoverIndex === LayoutModel.remaining(editor.configuration[zone.zoneKey],editor.dragId).length ? 58 : 0
                             color:"transparent"; clip:true
-                            Behavior on height { NumberAnimation { duration:110 } }
+                            Behavior on height { NumberAnimation { duration: theme.animations ? 110 : 0 } }
                             Rectangle { anchors.centerIn:parent; width:parent.width; height:3; radius:1; color:editor.accent }
                         }
                         Label { visible:editor.configuration[zone.zoneKey].length === 0 && editor.hoverZone !== zone.zoneKey; width:parent.width; text:"Нет компонентов"; opacity:0.4 }
@@ -325,7 +327,7 @@ Rectangle {
         }
         RowLayout {
             Label { text:"Расстояние"; Layout.fillWidth:true }
-            SpinBox { palette.button:"#30343c"; palette.base:"#30343c"; palette.text:"white"; palette.buttonText:"white"; objectName:"configurationGap"; enabled:editor.nativeAvailable && editor.applyScenario === "after-widgets" && !editor.applying; from:0; to:96; value:editor.configuration.gap; editable:true
+            SpinBox { palette.highlight: theme.accent; palette.highlightedText: theme.onAccent; palette.windowText: theme.ink; palette.text: theme.ink; palette.buttonText: theme.ink; palette.button: theme.soft; palette.base: theme.card;  objectName:"configurationGap"; enabled:editor.nativeAvailable && editor.supported(editor.configuration) && !editor.applying; from:0; to:96; value:editor.configuration.gap; editable:true
                 onValueModified: { var next=LayoutModel.clone(editor.queuedConfiguration || editor.configuration); next.gap=value; editor.commit(next) }
             }
             Label { text:"DIP"; opacity:0.6 }
@@ -338,7 +340,7 @@ Rectangle {
     }
     Rectangle {
         z:20; visible:editor.dragId !== ""; x:editor.pointerX-80; y:editor.pointerY-24; width:175; height:48; radius:9
-        color:"#ef30343c"; border.color:editor.accent
+        color:theme.soft; border.color:editor.accent
         Label { anchors.fill:parent; anchors.margins:8; text:editor.dragId ? LayoutModel.component(editor.dragId).label : ""; verticalAlignment:Text.AlignVCenter }
     }
     Shortcut { sequence:"Escape"; enabled:editor.canSubmit && (editor.dragId !== "" || !!editor.queuedConfiguration); onActivated: { editor.cancelDrag(); editor.discardQueuedApply() } }

@@ -3,14 +3,20 @@ AGENTS.md
 AGENTS.local.md
 .agents/
 .codex/
+/start.bat
+/scripts/Start-Local.ps1
 
 # Build, deployment and packaging outputs.
 /build/
+build/
 /build-*/
+build-*/
 /cmake-build-*/
 /out/
 /stage/
+stage/
 /dist/
+dist/
 CMakeFiles/
 CMakeCache.txt
 CMakeUserPresets.json
@@ -62,7 +68,9 @@ secrets.json
 
 # Temporary files, logs and desktop metadata.
 /tmp/
+tmp/
 /temp/
+temp/
 *.tmp
 *.temp
 *.log

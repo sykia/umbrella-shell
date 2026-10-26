@@ -668,7 +668,10 @@ int wmain(int argc, wchar_t** argv) {
                     SendMessageW(owner,trayMessage,width,0);continue;
                 }
                 const int perMonitor = sscanf_s(line, "%u %u %u %u %u %63s %c", &width, &edge, &thickness, &mode, &detached, request.device, 64u, &extra, 1u);
-                if (perMonitor == 6 && width >= 40 && width <= 100 && edge <= 3 && thickness >= (mode ? 64u : 48u) && thickness <= 96 && mode <= 1 && detached <= 1) {
+                // Compact islands share the 48 DIP lower bound with non-island panels;
+                // the module and the host fixture already verify the 48 DIP island path.
+                if (perMonitor == 6 && width >= 40 && width <= 100 && edge <= 3 &&
+                    thickness >= 48u && thickness <= 96 && mode <= 1 && detached <= 1) {
                     request.width = width;
                     request.packed = edge | (thickness << 2) | (mode << 9) | (detached << 10) | (1u << 11);
                     SendMessageW(owner, monitorMessage, 0, reinterpret_cast<LPARAM>(&request));

@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 Item {
     id: page
+    SettingsTheme { id: theme }
     objectName: "taskbarPage"
     property string edge: system ? system.edge : "bottom"
     property bool detached: system ? (system.detached || system.islands) : false
@@ -23,8 +24,6 @@ Item {
         islands = style === "islands"
         detached = style !== "attached"
         thickness = islands ? Math.max(48, islandThickness) : detached ? separateThickness : 48
-        if (islands) autoHide = false
-        else if (autoHide) thickness = 48
         scheduleApply()
     }
     readonly property bool vertical: edge === "left" || edge === "right"
@@ -35,7 +34,7 @@ Item {
     property bool autoHide: system ? system.autoHide : false
     property bool readyToApply: false
     property bool applyQueued: false
-    readonly property color accent: "#e7131b"
+    readonly property color accent: theme.accent
 
     Component.onCompleted: readyToApply = true
     function scheduleApply() {
@@ -72,27 +71,27 @@ Item {
     }
 
     component Caption: Text {
-        color: "white"
-        font.family: "Segoe UI"
+        color: theme.ink
+        font.family: "Segoe UI Variable"
         font.pixelSize: 13
         renderType: Text.NativeRendering
     }
-    component Choice: Button {
+    component Choice: FluentButton {
         id: choice
         property bool selected: false
         hoverEnabled: true
-        font.family: "Segoe UI"
+        font.family: "Segoe UI Variable"
         font.pixelSize: 12
         implicitHeight: 34
-        scale: pressed ? 0.97 : hovered ? 1.025 : 1
-        Behavior on scale { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+        scale: pressed ? 0.97 : hovered ? 1 : 1
+        Behavior on scale { NumberAnimation { duration: theme.animations ? 130 : 0; easing.type: Easing.OutCubic } }
         background: Rectangle {
-            radius: 11
-            color: choice.selected ? page.accent : choice.hovered ? "#30ffffff" : "#15ffffff"
-            Behavior on color { ColorAnimation { duration: 180 } }
+            radius: 5
+            color: choice.selected ? page.accent : choice.hovered ? theme.hover : theme.card
+            Behavior on color { ColorAnimation { duration: theme.animations ? 180 : 0 } }
         }
         contentItem: Text {
-            text: choice.text; font: choice.font; color: "white"
+            text: choice.text; font: choice.font; color: choice.selected ? theme.onAccent : theme.ink
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
@@ -105,15 +104,16 @@ Item {
         indicator: Rectangle {
             width: 48; height: 28; radius: 14
             anchors.centerIn: parent
-            color: toggle.checked ? page.accent : "#35ffffff"
-            Behavior on color { ColorAnimation { duration: 180 } }
+            border.width: toggle.checked ? 0 : 1; border.color: theme.muted
+            color: toggle.checked ? page.accent : theme.soft
+            Behavior on color { ColorAnimation { duration: theme.animations ? 180 : 0 } }
             Rectangle {
                 width: 20; height: 20; radius: 10; y: 4
                 x: toggle.checked ? 24 : 4
-                color: "white"
-                Behavior on x { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
+                color: toggle.checked ? theme.onAccent : theme.ink
+                Behavior on x { NumberAnimation { duration: theme.animations ? 190 : 0; easing.type: Easing.OutCubic } }
                 scale: toggle.down ? 0.9 : 1
-                Behavior on scale { NumberAnimation { duration: 120 } }
+                Behavior on scale { NumberAnimation { duration: theme.animations ? 120 : 0 } }
             }
         }
         contentItem: Item {}
@@ -129,19 +129,28 @@ Item {
         ColumnLayout {
             width: parent.width
             spacing: 12
-            Caption { text: "Taskbar"; font.pixelSize: 24; font.weight: Font.DemiBold }
-            ComboBox {
+            Caption { text: "Панель задач"; font.pixelSize: 30; font.weight: Font.DemiBold }
+            Flow {
                 objectName: "appearanceMonitor"
                 Layout.fillWidth: true
-                model: page.system && page.system.appearanceMonitors ? page.system.appearanceMonitors : []
-                textRole: "label"
-                valueRole: "id"
-                enabled: !page.applyQueued && !(page.system && page.system.pending)
-                currentIndex: page.system ? indexOfValue(page.system.selectedAppearanceMonitor) : -1
-                onActivated: page.system.selectAppearanceMonitor(currentValue)
+                spacing: 6
+                Repeater {
+                    model: page.system && page.system.appearanceMonitors ? page.system.appearanceMonitors : []
+                    Choice {
+                        required property var modelData
+                        required property int index
+                        objectName: "appearanceMonitor_" + index
+                        text: "Монитор " + (index + 1)
+                        selected: !!page.system && page.system.selectedAppearanceMonitor === modelData.id
+                        enabled: !page.applyQueued && !(page.system && page.system.pending)
+                        onClicked: page.system.selectAppearanceMonitor(modelData.id)
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.label
+                    }
+                }
             }
             Caption {
-                text: "Оформление — для выбранного экрана. Автоскрытие — общее для Windows."
+                text: "Оформление — для выбранного экрана. Независимое боковое расположение пока недоступно. Автоскрытие — общее для Windows."
                 font.pixelSize: 11
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
@@ -158,7 +167,7 @@ Item {
                 id: desktop
                 Layout.fillWidth: true
                 implicitHeight: 114
-                radius: 14; clip: true
+                radius: 8; clip: true
                 gradient: Gradient {
                     GradientStop { position: 0; color: "#485e62" }
                     GradientStop { position: 1; color: "#252b43" }
@@ -169,12 +178,12 @@ Item {
                 Rectangle {
                     x: desktop.width * 0.18; y: 22
                     width: desktop.width * 0.32; height: 47; radius: 7
-                    color: "#12ffffff"
+                    color: theme.card
                 }
                 Rectangle {
                     x: desktop.width * 0.42; y: 36
                     width: desktop.width * 0.35; height: 52; radius: 7
-                    color: "#12ffffff"
+                    color: theme.card
                 }
                 Rectangle {
                     id: previewBar
@@ -189,13 +198,13 @@ Item {
                     radius: page.detached ? 9 : 0
                     color: page.islands ? "transparent" : Qt.rgba(0.9, 0.92, 1, 1 - page.transparency / 100)
                     opacity: hidden ? 0.15 : 1
-                    Behavior on x { NumberAnimation { duration: 260; easing.type: Easing.InOutCubic } }
-                    Behavior on y { NumberAnimation { duration: 260; easing.type: Easing.InOutCubic } }
-                    Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.InOutCubic } }
-                    Behavior on height { NumberAnimation { duration: 260; easing.type: Easing.InOutCubic } }
-                    Behavior on radius { NumberAnimation { duration: 220 } }
-                    Behavior on color { ColorAnimation { duration: 100 } }
-                    Behavior on opacity { NumberAnimation { duration: 240 } }
+                    Behavior on x { NumberAnimation { duration: theme.animations ? 260 : 0; easing.type: Easing.InOutCubic } }
+                    Behavior on y { NumberAnimation { duration: theme.animations ? 260 : 0; easing.type: Easing.InOutCubic } }
+                    Behavior on width { NumberAnimation { duration: theme.animations ? 260 : 0; easing.type: Easing.InOutCubic } }
+                    Behavior on height { NumberAnimation { duration: theme.animations ? 260 : 0; easing.type: Easing.InOutCubic } }
+                    Behavior on radius { NumberAnimation { duration: theme.animations ? 220 : 0 } }
+                    Behavior on color { ColorAnimation { duration: theme.animations ? 100 : 0 } }
+                    Behavior on opacity { NumberAnimation { duration: theme.animations ? 240 : 0 } }
                     Repeater {
                         model: page.islands ? 3 : 5
                         Rectangle {
@@ -208,10 +217,10 @@ Item {
                             y: desktop.vertical ? (page.islands ? (index === 0 ? 3 : index === 1 ? (previewBar.height - height) / 2 : previewBar.height - height - 3) : previewBar.height / 2 - 36 + index * 15)
                                : (previewBar.height - height) / 2
                             color: page.islands ? "#a0dce1ed" : index === 0 ? page.accent : "#dce1ed"
-                            Behavior on radius { NumberAnimation { duration: 180 } }
+                            Behavior on radius { NumberAnimation { duration: theme.animations ? 180 : 0 } }
                             Rectangle {
                                 anchors.centerIn: parent; width: 6; height: 6; radius: 2
-                                visible: page.islands; color: index === 0 ? page.accent : "white"
+                                visible: page.islands; color: index === 0 ? page.accent : theme.ink
                             }
                         }
                     }
@@ -226,7 +235,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true; implicitHeight: 84
-                radius: 13; color: "#12ffffff"
+                radius: 8; color: theme.card; border.color: theme.line; border.width: 1
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 10; spacing: 8
                     Caption { text: "Расположение панели" }
@@ -255,7 +264,7 @@ Item {
             }
             Rectangle {
                 Layout.fillWidth: true; implicitHeight: 84
-                radius: 13; color: "#12ffffff"
+                radius: 8; color: theme.card; border.color: theme.line; border.width: 1
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 10; spacing: 8
                     Caption { text: "Вид панели" }
@@ -291,9 +300,9 @@ Item {
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
                 visible: implicitHeight > 0
-                clip: true; radius: 13; color: "#12ffffff"
-                Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 180 } }
+                clip: true; radius: 8; color: theme.card; border.color: theme.line; border.width: 1
+                Behavior on implicitHeight { NumberAnimation { duration: theme.animations ? 220 : 0; easing.type: Easing.InOutCubic } }
+                Behavior on opacity { NumberAnimation { duration: theme.animations ? 180 : 0 } }
                 ColumnLayout {
                     anchors.left: parent.left; anchors.right: parent.right
                     anchors.top: parent.top; anchors.margins: 10
@@ -302,7 +311,7 @@ Item {
                         Caption { text: page.vertical ? "Длина панели" : "Ширина панели"; Layout.fillWidth: true }
                         Caption { text: Math.round(page.widthPercent) + "%"; opacity: 0.8 }
                     }
-                    Slider {
+                    FluentSlider { palette.highlight: theme.accent; palette.highlightedText: theme.onAccent; palette.windowText: theme.ink; palette.text: theme.ink; palette.buttonText: theme.ink; palette.button: theme.soft; palette.base: theme.card;
                         id: widthSlider
                         objectName: "taskbarWidth"
                         Layout.fillWidth: true; implicitHeight: 30
@@ -311,23 +320,8 @@ Item {
                         opacity: enabled ? 1 : 0.35
                         onMoved: { page.widthPercent = value; page.scheduleApply() }
                         Accessible.name: page.vertical ? "Длина панели" : "Ширина панели"
-                        background: Rectangle {
-                            x: widthSlider.leftPadding
-                            y: (widthSlider.height - height) / 2
-                            width: widthSlider.availableWidth; height: 6; radius: 3
-                            color: "#28ffffff"
-                            Rectangle {
-                                width: widthSlider.visualPosition * parent.width
-                                height: parent.height; radius: parent.radius; color: page.accent
-                            }
-                        }
-                        handle: Rectangle {
-                            x: widthSlider.leftPadding + widthSlider.visualPosition * (widthSlider.availableWidth - width)
-                            y: (widthSlider.height - height) / 2
-                            width: 18; height: 18; radius: 9; color: "white"
-                            scale: widthSlider.pressed || widthSlider.hovered ? 1.16 : 1
-                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                        }
+
+
                     }
                 }
             }
@@ -337,9 +331,9 @@ Item {
                 implicitHeight: page.detached ? 84 : 0
                 opacity: page.detached ? 1 : 0
                 visible: implicitHeight > 0
-                clip: true; radius: 13; color: "#12ffffff"
-                Behavior on implicitHeight { NumberAnimation { duration: 220; easing.type: Easing.InOutCubic } }
-                Behavior on opacity { NumberAnimation { duration: 180 } }
+                clip: true; radius: 8; color: theme.card; border.color: theme.line; border.width: 1
+                Behavior on implicitHeight { NumberAnimation { duration: theme.animations ? 220 : 0; easing.type: Easing.InOutCubic } }
+                Behavior on opacity { NumberAnimation { duration: theme.animations ? 180 : 0 } }
                 ColumnLayout {
                     anchors.left: parent.left; anchors.right: parent.right
                     anchors.top: parent.top; anchors.margins: 10; height: 64; spacing: 4
@@ -347,7 +341,7 @@ Item {
                         Caption { text: page.vertical ? "Толщина панели" : "Высота панели"; Layout.fillWidth: true }
                         Caption { text: page.thickness + " px"; opacity: 0.8 }
                     }
-                    Slider {
+                    FluentSlider { palette.highlight: theme.accent; palette.highlightedText: theme.onAccent; palette.windowText: theme.ink; palette.text: theme.ink; palette.buttonText: theme.ink; palette.button: theme.soft; palette.base: theme.card;
                         id: thicknessSlider
                         objectName: "taskbarThickness"
                         Layout.fillWidth: true; implicitHeight: 30
@@ -356,78 +350,49 @@ Item {
                         opacity: enabled ? 1 : 0.35
                         onMoved: { page.thickness = Math.round(value); page.scheduleApply() }
                         Accessible.name: "Толщина панели"
-                        background: Rectangle {
-                            x: thicknessSlider.leftPadding
-                            y: (thicknessSlider.height - height) / 2
-                            width: thicknessSlider.availableWidth; height: 6; radius: 3; color: "#28ffffff"
-                            Rectangle { width: thicknessSlider.visualPosition * parent.width; height: parent.height; radius: 3; color: page.accent }
-                        }
-                        handle: Rectangle {
-                            x: thicknessSlider.leftPadding + thicknessSlider.visualPosition * (thicknessSlider.availableWidth - width)
-                            y: (thicknessSlider.height - height) / 2
-                            width: 18; height: 18; radius: 9; color: "white"
-                            scale: thicknessSlider.pressed || thicknessSlider.hovered ? 1.16 : 1
-                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                        }
+
+
                     }
                 }
             }
             Rectangle {
                 Layout.fillWidth: true; implicitHeight: 83
-                radius: 13; color: "#12ffffff"
+                radius: 8; color: theme.card; border.color: theme.line; border.width: 1
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 10; spacing: 4
                     RowLayout {
                         Caption { text: "Прозрачность панели"; Layout.fillWidth: true }
                         Caption { text: Math.round(page.transparency) + "%"; opacity: 0.8 }
                     }
-                    Slider {
+                    FluentSlider { palette.highlight: theme.accent; palette.highlightedText: theme.onAccent; palette.windowText: theme.ink; palette.text: theme.ink; palette.buttonText: theme.ink; palette.button: theme.soft; palette.base: theme.card;
                         id: transparencySlider
                         Layout.fillWidth: true
                         from: 0; to: 100; value: page.transparency; stepSize: 1
                         onMoved: { page.transparency = value; page.scheduleApply() }
                         Accessible.name: "Прозрачность панели"
                         implicitHeight: 30
-                        background: Rectangle {
-                            x: transparencySlider.leftPadding
-                            y: (transparencySlider.height - height) / 2
-                            width: transparencySlider.availableWidth; height: 6; radius: 3
-                            color: "#28ffffff"
-                            Rectangle {
-                                width: transparencySlider.visualPosition * parent.width
-                                height: parent.height; radius: parent.radius
-                                color: page.accent
-                            }
-                        }
-                        handle: Rectangle {
-                            x: transparencySlider.leftPadding + transparencySlider.visualPosition * (transparencySlider.availableWidth - width)
-                            y: (transparencySlider.height - height) / 2
-                            width: 18; height: 18; radius: 9
-                            color: "white"
-                            scale: transparencySlider.pressed || transparencySlider.hovered ? 1.16 : 1
-                            Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                        }
+
+
                     }
                 }
             }
             Rectangle {
                 Layout.fillWidth: true; implicitHeight: 64
-                radius: 13; color: "#12ffffff"
+                radius: 8; color: theme.card; border.color: theme.line; border.width: 1
                 RowLayout {
                     anchors.fill: parent; anchors.margins: 10
                     ColumnLayout {
                         spacing: 3; Layout.fillWidth: true
                         Caption { text: "Автоскрытие" }
-                        Caption { text: page.islands ? "Недоступно для вида «Островки»" : page.edge === "bottom" ? "Полная панель · стандартная толщина" : "Доступно при расположении снизу"; opacity: 0.6; font.pixelSize: 10 }
+                        Caption { text: page.edge === "bottom" ? "Доступно для всех видов панели" : "Доступно при расположении снизу"; opacity: 0.6; font.pixelSize: 10 }
                     }
                     Toggle {
                         objectName: "taskbarAutoHide"
                         checked: page.autoHide
-                        enabled: page.edge === "bottom" && !page.islands
+                        enabled: page.edge === "bottom"
                         opacity: enabled ? 1 : 0.4
                         onToggled: {
                             page.autoHide = checked
-                            if (checked) { page.widthPercent = 100; page.thickness = 48; page.islands = false }
                             page.scheduleApply()
                         }
                         Accessible.name: "Автоскрытие панели"
