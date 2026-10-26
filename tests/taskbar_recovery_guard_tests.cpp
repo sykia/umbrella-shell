@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
         TaskbarSettings lost;TaskbarSettingsFixture::lose(lost,primaryDevice);settings.sync();
         require(lost.activeComponentConfigurations().size()==1 && !lost.activeComponentConfigurations().contains(primary),
             "Native loss affected the other monitor");
+        require(lost.confirmedComponentConfigurations().size()==2 && lost.confirmedComponentConfigurations().contains(primary),
+            "Native loss hid the last confirmed layout from presentation");
         require(settings.value("confirmedComponentsV2").toByteArray()==confirmed &&
             !settings.value("resumeAppearance").toBool() && settings.value("resumeComponents").toBool(),
             "Native loss discarded last confirmed intent or changed resume flags");

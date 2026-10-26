@@ -14,6 +14,7 @@ class TaskbarSettings final : public QObject {
     Q_PROPERTY(QVariantMap activeComponentConfiguration READ activeComponentConfiguration NOTIFY changed)
     Q_PROPERTY(QString activeComponentMonitor READ activeComponentMonitor NOTIFY changed)
     Q_PROPERTY(QVariantMap activeComponentConfigurations READ activeComponentConfigurations NOTIFY changed)
+    Q_PROPERTY(QVariantMap confirmedComponentConfigurations READ confirmedComponentConfigurations NOTIFY changed)
     Q_PROPERTY(bool componentPlacementAvailable READ sidesAvailable CONSTANT)
     Q_PROPERTY(bool available READ available NOTIFY changed)
     Q_PROPERTY(bool widthAvailable READ widthAvailable CONSTANT)
@@ -50,6 +51,7 @@ public:
     QVariantMap activeComponentConfiguration() const { return activeComponentConfiguration_; }
     QString activeComponentMonitor() const { return activeComponentMonitor_; }
     QVariantMap activeComponentConfigurations() const { return activeComponents_; }
+    QVariantMap confirmedComponentConfigurations() const { return confirmedComponents_; }
     Q_INVOKABLE QStringList componentIds(const QString& monitor,bool refresh=false);
     Q_INVOKABLE bool applyComponentConfiguration(const QString& monitor, const QVariantMap& configuration);
     Q_INVOKABLE bool restoreComponentConfiguration(const QString& monitor);

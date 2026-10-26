@@ -38,7 +38,15 @@ Rectangle {
     function currentConfiguration() {
         var live = system && system.activeComponentConfigurations !== undefined && monitor
             ? system.activeComponentConfigurations[monitor.id] : system && system.activeComponentMonitor === (monitor ? monitor.id : "") ? system.activeComponentConfiguration : null
-        return LayoutModel.reconcile(live ? LayoutModel.clone(live) : null,monitor ? monitor.primary : true,actualIds)
+        // Explorer can temporarily rebuild Search and its surrounding XAML tree.
+        // Native placement is then inactive, but the last acknowledged intent is
+        // still authoritative and must not be replaced with the default layout.
+        var confirmed = system && system.confirmedComponentConfigurations !== undefined && monitor
+            ? system.confirmedComponentConfigurations[monitor.id] : null
+        var savedDraft = !live && !confirmed && system && typeof system.componentDraft === "function" && monitor
+            ? system.componentDraft(monitor.id) : null
+        var source = live || confirmed || savedDraft
+        return LayoutModel.reconcile(source ? LayoutModel.clone(source) : null,monitor ? monitor.primary : true,actualIds)
     }
     function loadMonitor() {
         if (!monitor) return

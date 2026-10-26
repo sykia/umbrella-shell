@@ -214,6 +214,22 @@ bool TaskbarSettings::restoreSavedAppearanceImpl(bool freshSession) {
         status_ = QStringLiteral("Сохранённые параметры сейчас несовместимы; файл настроек не изменён."); emit changed(); return true;
     }
     std::stable_sort(targets.begin(), targets.end(), [](const Target& a, const Target& b) { return a.primary && !b.primary; });
+    // Older per-monitor profiles may contain different island dimensions.  A
+    // shared Explorer owner cannot keep that geometry coherent after one panel
+    // is rebuilt, so restore one canonical island size on every active panel.
+    const auto canonicalIsland = std::find_if(targets.cbegin(), targets.cend(), [](const Target& target) {
+        return target.value["islands"].toVariant().toBool();
+    });
+    if (canonicalIsland != targets.cend()) {
+        const auto width = canonicalIsland->value["widthPercent"];
+        const auto thickness = canonicalIsland->value["thickness"];
+        for (auto& target : targets) {
+            target.value["detached"] = true;
+            target.value["islands"] = true;
+            target.value["widthPercent"] = width;
+            target.value["thickness"] = thickness;
+        }
+    }
     bool autoHide = settings.value("autoHide", autoHide_).toBool();
     for (const auto& target : targets) {
         const auto& value = target.value;
