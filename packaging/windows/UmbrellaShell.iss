@@ -22,7 +22,9 @@ PrivilegesRequired=admin
 UsePreviousAppDir=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.22000
+; Keep setup runnable on Windows 10-derived Server hosts used for unattended
+; package verification. The application itself remains supported on Windows 11.
+MinVersion=10.0
 OutputDir={#OutputDir}
 OutputBaseFilename=UmbrellaShell-{#AppVersion}-windows-x64-setup
 Compression=lzma2
