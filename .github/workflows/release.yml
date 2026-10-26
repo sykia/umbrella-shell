@@ -73,6 +73,9 @@ jobs:
           Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
           Remove-Item Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
           ./scripts/Test-DeployedApp.ps1
+      - name: Verify Program Files install and uninstall
+        shell: pwsh
+        run: ./scripts/Test-Installer.ps1
       - name: Publish Umbrella Shell release
         shell: pwsh
         env:

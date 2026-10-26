@@ -16,9 +16,10 @@ AppPublisher=sykia
 AppPublisherURL=https://github.com/sykia
 AppSupportURL=https://github.com/sykia/umbrella-shell/issues
 AppUpdatesURL=https://github.com/sykia/umbrella-shell/releases
-DefaultDirName={localappdata}\Programs\Umbrella Shell
+DefaultDirName={autopf}\Umbrella Shell
 DefaultGroupName=Umbrella Shell
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
+UsePreviousAppDir=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
@@ -49,8 +50,8 @@ Name: "{group}\Uninstall Umbrella Shell"; Filename: "{uninstallexe}"
 ; In-place installation is NOT an atomic updater or a crash rollback mechanism.
 
 [Run]
-Filename: "{app}\UmbrellaMenuHost.exe"; Parameters: "--start"; Flags: nowait runhidden
-Filename: "{app}\UmbrellaShell.exe"; Description: "Launch Umbrella Shell"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\UmbrellaMenuHost.exe"; Parameters: "--start"; Flags: nowait runhidden runasoriginaluser
+Filename: "{app}\UmbrellaShell.exe"; Description: "Launch Umbrella Shell"; Flags: nowait postinstall skipifsilent unchecked runasoriginaluser
 
 
 [Registry]
@@ -61,32 +62,46 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 Filename: "{app}\UmbrellaShell.exe"; Parameters: "--restore-taskbar-style"; Flags: runhidden waituntilterminated; RunOnceId: "RestoreTaskbarAppearance"
 
 [Code]
-function StopMenuHelper(): Boolean;
+function StopUmbrellaAt(const Directory: String): Boolean;
 var
-  Filename: String;
+  Helper: String;
+  Shell: String;
   ExitCode: Integer;
 begin
-  Filename := ExpandConstant('{app}\UmbrellaMenuHost.exe');
+  Helper := AddBackslash(Directory) + 'UmbrellaMenuHost.exe';
+  Shell := AddBackslash(Directory) + 'UmbrellaShell.exe';
   Result := True;
-  if FileExists(Filename) then
+  if FileExists(Helper) then
   begin
     { Exit code 2 is the older helper's unsupported-argument result. }
-    Result := Exec(Filename, '--quit-settings', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and ((ExitCode = 0) or (ExitCode = 2));
+    Result := Exec(Helper, '--quit-settings', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and ((ExitCode = 0) or (ExitCode = 2));
     if Result then
-      Result := Exec(Filename, '--stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
+      Result := Exec(Helper, '--stop', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
   end;
+  if Result and FileExists(Shell) then
+    Result := Exec(Shell, '--restore-taskbar-style', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) and (ExitCode = 0);
+end;
+
+function StopUmbrellaCopies(): Boolean;
+var
+  LegacyDirectory: String;
+begin
+  LegacyDirectory := ExpandConstant('{localappdata}\Programs\Umbrella Shell');
+  Result := StopUmbrellaAt(LegacyDirectory);
+  if Result and (CompareText(LegacyDirectory, ExpandConstant('{app}')) <> 0) then
+    Result := StopUmbrellaAt(ExpandConstant('{app}'));
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-  if not StopMenuHelper() then
-    Result := 'Umbrella taskbar menu could not be stopped. Close its menu and retry the installation.';
+  if not StopUmbrellaCopies() then
+    Result := 'Umbrella could not restore the taskbar and stop its running copies. Sign out of Windows, sign in, and retry the installation.';
 end;
 
 function InitializeUninstall(): Boolean;
 begin
-  Result := StopMenuHelper();
+  Result := StopUmbrellaCopies();
   if not Result then
-    MsgBox('Umbrella taskbar menu could not be stopped. Close its menu and retry uninstalling.', mbError, MB_OK);
+    MsgBox('Umbrella could not restore the taskbar and stop its running copies. Sign out of Windows, sign in, and retry uninstalling.', mbError, MB_OK);
 end;

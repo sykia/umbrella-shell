@@ -1,4 +1,4 @@
-# Umbrella Shell 1.0.0
+# Umbrella Shell 1.0.1
 
 Первый полный выпуск Umbrella Shell для Windows 11 x64. Автор: [sykia](https://github.com/sykia).
 
@@ -16,9 +16,11 @@ Umbrella не заменяет Explorer, не устанавливает сис�
 
 ## Установка
 
-1. Скачайте `UmbrellaShell-1.0.0-windows-x64-setup.exe` и файл `.sha256`.
-2. При желании проверьте SHA-256: `Get-FileHash .\UmbrellaShell-1.0.0-windows-x64-setup.exe -Algorithm SHA256`.
-3. Запустите установщик. Установка выполняется только для текущего пользователя.
+1. Скачайте `UmbrellaShell-1.0.1-windows-x64-setup.exe` и файл `.sha256`.
+2. При желании проверьте SHA-256: `Get-FileHash .\UmbrellaShell-1.0.1-windows-x64-setup.exe -Algorithm SHA256`.
+3. Запустите установщик и подтвердите UAC. Файлы устанавливаются в
+   `C:\Program Files\Umbrella Shell`, но настройки и автозапуск остаются
+   пользовательскими.
 4. Откройте Umbrella из меню «Пуск» или из контекстного меню панели задач.
 
 Настройки хранятся отдельно от каталога программы и сохраняются при обновлении или удалении. Для аварийного возврата используйте пункт **Restore taskbar appearance** в меню «Пуск» либо команду `UmbrellaShell.exe --restore-taskbar-style`.
@@ -32,4 +34,4 @@ Umbrella не заменяет Explorer, не устанавливает сис�
 - Автоскрытие поддерживается только снизу при полной ширине и стандартной толщине без островков.
 - Если артефакт не имеет Authenticode-подписи, Windows может показать предупреждение «Неизвестный издатель». SHA-256 проверяет целостность, но не заменяет подпись.
 
-Полная матрица фактически выполненных проверок приведена в [`docs/VERIFICATION.md`](https://github.com/sykia/umbrella-shell/blob/v1.0.0/docs/VERIFICATION.md).
+Полная матрица фактически выполненных проверок приведена в [`docs/VERIFICATION.md`](https://github.com/sykia/umbrella-shell/blob/v1.0.1/docs/VERIFICATION.md).
