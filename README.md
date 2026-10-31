@@ -1,3 +1,39 @@
+<!-- project-presentation -->
+<p align="center"><img src="assets/umbrella.png" alt="Umbrella Shell" width="88"></p>
+<h1 align="center">Umbrella Shell</h1>
+<p align="center">Панель задач Windows 11 — с вашей раскладкой.</p>
+<p align="center"> <strong>Windows 11 x64 · C++20 · Qt 6.8.3 · Win32</strong></p>
+<p align="center"><a href="https://github.com/sykia/umbrella-shell/releases/tag/v1.0.2"><img src="docs/presentation/action.svg" alt="Открыть предварительный релиз" width="280" height="60"></a></p>
+
+Настройка штатной панели задач Explorer: расположение, размеры, прозрачность и группы. Отдельно — часы-виджеты для рабочего стола.
+
+## Три вида панели
+
+| Слитный | Отдельный | Островки |
+| :--- | :--- | :--- |
+| Единая поверхность панели | Отступы и отдельное оформление | Визуальное разделение групп |
+
+- Панель сверху, снизу, слева или справа; настройка длины, толщины и прозрачности.
+- Конструктор системных групп Left / Center / Right.
+- Часы с горизонтальным и вертикальным расположением цифр, цветами и blur.
+- Светлая, тёмная и контрастная тема; Mica/Acrylic с непрозрачным fallback.
+
+## Установка и восстановление
+
+**Проект находится в предварительном выпуске.** Требуется Windows 11 x64, build 22000 или новее; доступные операции зависят от совместимости системных DLL. Автообновления отключены.
+
+1. Откройте [релиз v1.0.2](https://github.com/sykia/umbrella-shell/releases/tag/v1.0.2), прочитайте ограничения и выберите установщик.
+2. После установки откройте Umbrella Shell из меню «Пуск».
+3. Для отката используйте **«Вернуть исходный вид»** или пункт **Restore taskbar appearance** в меню «Пуск».
+
+Приложение оформляет существующую панель, не заменяя оболочку Windows. Сценарии, которые ещё требуют проверки, перечислены в [VERIFICATION.md](docs/VERIFICATION.md).
+
+**[Возможности панели](docs/TASKBAR.md) · [Конструктор](docs/TASKBAR_CONFIGURATION.md) · [Архитектура](docs/ARCHITECTURE.md) · [Восстановление](docs/STARTUP_RECOVERY.md)**
+
+
+<details>
+<summary><strong>Полная документация, установка и технические подробности</strong></summary>
+
 <div align="center">
   <img src="assets/umbrella.png" width="150" alt="Umbrella Shell">
   <h1>Umbrella Shell</h1>
@@ -137,3 +173,9 @@ Core не зависит от Qt и Windows. Приложение владеет
 - [История изменений](CHANGELOG.md)
 
 Автор проекта — [sykia](https://github.com/sykia). Лицензия собственного кода владельцем пока не выбрана; отсутствие файла LICENSE не предоставляет разрешения на копирование, изменение или распространение кода.
+
+</details>
+
+---
+
+[sykia](https://github.com/sykia) · [TG Mod](https://github.com/sykia/tdesktop) · [Blockyard](https://github.com/sykia/blockyard) · [SoundCloud Desktop](https://github.com/sykia/soundcloud-desktop) · [Umbrella Shell](https://github.com/sykia/umbrella-shell)
